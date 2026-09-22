@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { rewriteHints, type RewriteHint } from "@/lib/rewrite";
+import { rewriteHints, type Positioning, type RewriteHint } from "@/lib/rewrite";
 import { screen } from "@/lib/screen";
 
 /** Both API keys are read here, on the server. Neither reaches the browser. */
@@ -58,6 +58,7 @@ export async function POST(request: Request) {
     // The rewrite step is a bonus, not the product. If it fails — no Anthropic
     // key, a refusal, a rate limit — the measured result still ships.
     let hints: RewriteHint[] = [];
+    let positioning: Positioning = null;
     let hintsError: string | null = null;
 
     if (!process.env.OPENAI_API_KEY) {
@@ -65,7 +66,14 @@ export async function POST(request: Request) {
         "OPENAI_API_KEY is not set, so rewrite suggestions were skipped. Scores and gaps are unaffected.";
     } else {
       try {
-        hints = await rewriteHints(resume, jobAd, result.gaps);
+        const written = await rewriteHints(resume, jobAd, result.gaps, {
+          roleWants: result.profile.roleWants,
+          resumeReads: result.profile.resumeReads,
+          matches: result.profile.matches,
+          line: result.positioningLine,
+        });
+        hints = written.hints;
+        positioning = written.positioning;
       } catch (error) {
         hintsError =
           error instanceof Error
@@ -74,7 +82,7 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ ...result, hints, hintsError });
+    return NextResponse.json({ ...result, hints, positioning, hintsError });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Screening failed.";

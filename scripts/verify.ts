@@ -310,10 +310,28 @@ async function main() {
   });
 
   check("every gap gets both a where and a has question", () => {
-    const wheres = Object.keys(anchorPass.questions).filter((k) => k.startsWith("where__"));
-    const hases = Object.keys(anchorPass.questions).filter((k) => k.startsWith("has__"));
-    assert.equal(wheres.length, hases.length);
+    const gapIds = new Set(result.gaps.map((g) => g.id));
+    const wheres = Object.keys(anchorPass.questions)
+      .filter((k) => k.startsWith("where__"))
+      .map((k) => k.slice(7))
+      .filter((id) => gapIds.has(id));
+    const hases = Object.keys(anchorPass.questions)
+      .filter((k) => k.startsWith("has__"))
+      .map((k) => k.slice(5));
     assert.ok(wheres.length > 0);
+    assert.deepEqual(wheres.sort(), hases.sort());
+  });
+
+  check("positioning and strongest-line are asked without a has companion", () => {
+    // These two always have an answer — every resume has a line that frames it
+    // and a line that is its best evidence — so the no-match guard that gap
+    // anchoring needs would only add noise here.
+    assert.ok(anchorPass.questions.where__positioning, "positioning asked");
+    assert.ok(!anchorPass.questions.has__positioning, "no positioning guard");
+  });
+
+  check("the positioning line is anchored back to the document", () => {
+    assert.equal(result.positioningLine?.line, 3);
   });
 
   check("line ids offered as options are the original line numbers", () => {

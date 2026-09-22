@@ -142,6 +142,10 @@ export type ScreenResult = {
     machineReadable: number;
     hardRequirementConflict: number;
   };
+  /** The line that frames how the whole resume reads. */
+  positioningLine: Anchor | null;
+  /** The strongest single piece of evidence for this job. */
+  strongestLine: Anchor | null;
   usage: { inputTokens: number; outputTokens: number };
   model: string;
 };
@@ -454,11 +458,22 @@ export type Anchor = {
 async function anchorGaps(
   resume: string,
   gaps: DimensionResult[],
+  topStrength: DimensionResult | undefined,
   options: ScreenOptions,
-): Promise<{ anchors: Map<string, Anchor>; usage: Usage }> {
+): Promise<{
+  anchors: Map<string, Anchor>;
+  positioning: Anchor | null;
+  strongest: Anchor | null;
+  usage: Usage;
+}> {
   const anchors = new Map<string, Anchor>();
-  const none = { anchors, usage: { input_tokens: 0, output_tokens: 0 } };
-  if (gaps.length === 0) return none;
+  const none = {
+    anchors,
+    positioning: null,
+    strongest: null,
+    usage: { input_tokens: 0, output_tokens: 0 },
+  };
+  if (gaps.length === 0 && !topStrength) return none;
 
   const lines = numberLines(resume).slice(0, MAX_ANCHOR_LINES);
   if (lines.length === 0) return none;
@@ -493,12 +508,48 @@ async function anchorGaps(
     );
   }
 
+  // The line that decides what kind of practitioner the reader thinks you
+  // are. Usually the summary, which is exactly the line people never revisit.
+  questions.where__positioning = choice(
+    {
+      question:
+        "Which single line of `resume` most sets a reader's first impression of what kind of practitioner this person is?",
+      focus:
+        "The line that frames everything read after it, such as a summary or headline. Not the most impressive line — the most defining one.",
+    },
+    ids,
+  );
+
+  // Asked resume-only, with the competency name carrying the job's interest,
+  // so pass 4 never needs to see the ad.
+  if (topStrength) {
+    questions.where__strongest = choice(
+      {
+        question: `Which single line of \`resume\` is the strongest evidence of this person's ${topStrength.label.toLowerCase()}?`,
+        focus: "The line a reader would point at as proof, not a skills entry.",
+      },
+      ids,
+    );
+  }
+
   const res = await client(options).systemOne({
     state: { resume: tagged },
     questions,
   });
 
   const answers = res.answers as Answers;
+
+  const readAnchor = (key: string): Anchor | null => {
+    const picked = asChoice(answers, key, "");
+    const line = byId.get(picked.value);
+    if (!line) return null;
+    return {
+      line: line.n,
+      text: line.text,
+      confidence: picked.confidence,
+      uncertain: picked.confidence < MIN_ANCHOR_CONFIDENCE,
+    };
+  };
 
   for (const gap of gaps) {
     if (asNoul(answers, `has__${gap.id}`) < 0.5) continue;
@@ -515,7 +566,12 @@ async function anchorGaps(
     });
   }
 
-  return { anchors, usage: res.usage };
+  return {
+    anchors,
+    positioning: readAnchor("where__positioning"),
+    strongest: topStrength ? readAnchor("where__strongest") : null,
+    usage: res.usage,
+  };
 }
 
 // --- composition -----------------------------------------------------------
@@ -599,20 +655,22 @@ export async function screen(
     .sort((a, b) => b.cost - a.cost)
     .slice(0, 5);
 
+  const strengths = [...confident]
+    .filter((d) => d.demonstrated >= 0.6 && d.importance >= 0.5)
+    .sort(
+      (a, b) => b.demonstrated * b.importance - a.demonstrated * a.importance,
+    )
+    .slice(0, 4);
+
   // Pass 4 needs the gap list, so it cannot run alongside passes 2 and 3.
-  const anchored = await anchorGaps(resume, gaps, options);
+  const anchored = await anchorGaps(resume, gaps, strengths[0], options);
   for (const gap of gaps) gap.anchor = anchored.anchors.get(gap.id) ?? null;
 
   return {
     fit: fitScore,
     dimensions: [...dimensions].sort((a, b) => b.importance - a.importance),
     gaps,
-    strengths: [...confident]
-      .filter((d) => d.demonstrated >= 0.6 && d.importance >= 0.5)
-      .sort(
-        (a, b) => b.demonstrated * b.importance - a.demonstrated * a.importance,
-      )
-      .slice(0, 4),
+    strengths,
     unreadable,
     seniority: {
       required: role.seniority.value,
@@ -655,6 +713,8 @@ export async function screen(
       buriesTheLede: asNoul(fAnswers, "buries_the_lede"),
       hardRequirementConflict: asNoul(fAnswers, "hard_requirement_conflict"),
     },
+    positioningLine: anchored.positioning,
+    strongestLine: anchored.strongest,
     usage: {
       inputTokens:
         role.usage.input_tokens +

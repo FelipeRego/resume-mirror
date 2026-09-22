@@ -5,10 +5,117 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { TALENT_PROFILES } from "@/lib/dimensions";
 import { redact, type Redaction } from "@/lib/redact";
-import type { RewriteHint } from "@/lib/rewrite";
+import type { Positioning, RewriteHint } from "@/lib/rewrite";
 import type { ScreenResult } from "@/lib/screen";
 
-type Report = ScreenResult & { hints: RewriteHint[]; hintsError: string | null };
+type Report = ScreenResult & {
+  hints: RewriteHint[];
+  positioning: Positioning;
+  hintsError: string | null;
+};
+
+type Action = {
+  /** The imperative. Starts with a verb. */
+  what: string;
+  /** Where in the document, when we know. */
+  where: string | null;
+  /** One line of context, kept short. */
+  detail?: string;
+};
+
+/**
+ * The "so what do I do" list, composed in code from measurements we already
+ * trust rather than asked of a model. Ordering is the whole value: a hard
+ * requirement can make the rest moot, and positioning gates how anything
+ * further down gets read.
+ */
+function buildActions(report: Report): Action[] {
+  const out: Action[] = [];
+  const hintFor = (id: string) => report.hints.find((h) => h.dimension_id === id);
+
+  if (report.signals.hardRequirementConflict > 0.5) {
+    out.push({
+      what: "Check you actually meet this job's hard requirement",
+      where: null,
+      detail:
+        "The ad names a location, work right, licence or credential your resume doesn't appear to meet. Settle that before spending an evening on the rest.",
+    });
+  }
+
+  if (!report.profile.matches && report.positioning) {
+    out.push({
+      what: `Rewrite your opening so you read as a ${profileName(report.profile.roleWants)}`,
+      where: report.positioningLine ? `line ${report.positioningLine.line}` : null,
+      detail:
+        "This frames everything read after it, so it's worth more than any single bullet below.",
+    });
+  }
+
+  // Rewrites are per-line, so each earns its own step.
+  for (const gap of report.gaps.slice(0, 3)) {
+    const hint = hintFor(gap.id);
+    if (hint && !hint.evidence_missing && gap.anchor) {
+      out.push({
+        what: `Rewrite the ${gap.label.toLowerCase()} line`,
+        where: `line ${gap.anchor.line}`,
+        detail: `You're ${Math.round((gap.importance - gap.demonstrated) * 100)} points short on something this job weights at ${pct(gap.importance)}.`,
+      });
+    }
+  }
+
+  // Absences collapse into one decision. Three separate "decide whether to
+  // chase X" steps read as three tasks when they are really one question
+  // about whether this role is the right target at all.
+  const absent = report.gaps.filter(
+    (g) => hintFor(g.id)?.evidence_missing ?? false,
+  );
+  if (absent.length > 0) {
+    const names = absent.map((g) => g.label.toLowerCase());
+    const list =
+      names.length === 1
+        ? names[0]
+        : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+    out.push({
+      what:
+        absent.length === 1
+          ? `Decide whether to chase ${list} or let this role go`
+          : `Decide whether this is the right role to chase`,
+      where: null,
+      detail:
+        absent.length === 1
+          ? `This job weights it at ${pct(absent[0].importance)} and your resume has nothing to point at. Wording won't close it.`
+          : `${absent.length} of this job's core requirements — ${list} — aren't in your resume at all. No amount of rewriting closes that, so the honest question is whether to build the experience or find a closer role.`,
+    });
+  }
+
+  if (report.signals.buriesTheLede > 0.5) {
+    out.push({
+      what: report.strongestLine
+        ? `Move line ${report.strongestLine.line} into your top third`
+        : "Move your most relevant experience into the top third",
+      where: report.strongestLine ? `line ${report.strongestLine.line}` : null,
+      detail: "A screener decides in the first third. Below that is effectively unread.",
+    });
+  }
+
+  if (report.signals.quantifiedOutcomes < 0.5) {
+    out.push({
+      what: "Put a number on three of your bullets",
+      where: null,
+      detail: "How many, how much, how fast, how many people. It's the cheapest credibility there is.",
+    });
+  }
+
+  if (report.signals.keywordStuffing > 0.5) {
+    out.push({
+      what: "Cut the skills you can't point at in your experience",
+      where: null,
+      detail: "Listing things your roles never demonstrate weakens the ones you can genuinely back.",
+    });
+  }
+
+  return out.slice(0, 5);
+}
 
 const SENIORITY_LABEL: Record<string, string> = {
   entry: "ENTRY",
@@ -471,6 +578,7 @@ function Results({ report }: { report: Report }) {
   return (
     <div className="mt-8 flex flex-col gap-6">
       <Headline report={report} />
+      <StartHere report={report} />
       <ProfileRead report={report} />
 
       <Window title="What this job wants, and where you stand" tone="accent">
@@ -502,10 +610,27 @@ function Results({ report }: { report: Report }) {
       {report.strengths.length > 0 && (
         <Window title="Lead with these">
           <div className="p-5">
-            <p className="mb-3 text-[13px]/relaxed text-[var(--muted)]">
-              Strong evidence on things this job actually asks for. Get them
-              above the fold.
+            <p className="mb-3 text-[14px]/relaxed">
+              <strong>What to do:</strong>{" "}
+              {report.strongestLine ? (
+                <>
+                  your strongest proof for this job is on{" "}
+                  <strong>line {report.strongestLine.line}</strong>. If it
+                  isn&apos;t in your top third, move it — and echo it in your
+                  opening line so it&apos;s read twice.
+                </>
+              ) : (
+                <>
+                  get these into your top third and into your opening line. A
+                  strength a screener never reaches counts for nothing.
+                </>
+              )}
             </p>
+            {report.strongestLine && (
+              <p className="mb-4 border-l-4 border-[var(--good)] bg-[var(--good)]/[0.08] px-3.5 py-2.5 text-[13px]/relaxed">
+                {report.strongestLine.text}
+              </p>
+            )}
             <ul className="flex flex-wrap gap-2">
               {report.strengths.map((s) => (
                 <li
@@ -700,16 +825,64 @@ function DimensionRow({
   );
 }
 
+/** The answer to "so what do I actually do?", ordered. */
+function StartHere({ report }: { report: Report }) {
+  const actions = buildActions(report);
+  if (actions.length === 0) return null;
+
+  return (
+    <Window title="Start here" tone="warn">
+      <div className="p-5">
+        <p className="text-[13px]/relaxed text-[var(--muted)]">
+          In this order. Everything below this block is the reasoning behind it.
+        </p>
+        <ol className="mt-4 flex flex-col gap-3">
+          {actions.map((a, i) => (
+            <li key={i} className="flex gap-3.5">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center border border-[var(--ink)] bg-[var(--accent)] text-[13px] font-bold">
+                {i + 1}
+              </span>
+              <div className="min-w-0 pt-0.5">
+                <p className="text-[14px]/relaxed font-bold">
+                  {a.what}
+                  {a.where && (
+                    <span className="ml-2 border border-[var(--ink)] px-1.5 py-0.5 text-[11px] font-normal uppercase tracking-wider">
+                      {a.where}
+                    </span>
+                  )}
+                </p>
+                {a.detail && (
+                  <p className="mt-1 text-[12px]/relaxed text-[var(--muted)]">
+                    {a.detail}
+                  </p>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </Window>
+  );
+}
+
 function Headline({ report }: { report: Report }) {
   const { seniority, experience } = report;
 
-  const note = seniority.uncertain
+  // What the number actually means for the decision in front of them.
+  const verdict =
+    report.fit >= 0.7
+      ? "You're competitive here. Tighten the lines below and send it."
+      : report.fit >= 0.45
+        ? "Worth applying, but not as it stands. The changes below are what close the distance."
+        : "This is a stretch as written. Work the list below first, or find a role closer to what you've actually done.";
+
+  const seniorityNote = seniority.uncertain
     ? "The two reads are close enough that the level is genuinely arguable — see the split below."
     : seniority.delta === 0
-      ? "You're pitching at the right level for this one."
+      ? "You're pitching at the right level for this one, so don't over-claim: the gap is in evidence, not ambition."
       : seniority.delta < 0
-        ? "You're reaching above what the resume currently backs up. Not fatal, but the gaps below are what a screener will catch."
-        : "You're aiming below what your resume supports. Worth asking whether there's a bigger version of this role.";
+        ? "You're reaching above what the resume backs up. Senior reads come from owned decisions and outcomes, not longer task lists — that's what the rewrites below change."
+        : "You're aiming below what your resume supports. Worth checking whether there's a bigger version of this role open.";
 
   return (
     <Window title="How you'd land" tone="accent">
@@ -723,7 +896,8 @@ function Headline({ report }: { report: Report }) {
           </div>
         </div>
         <div className="flex min-w-0 flex-col gap-4 text-[14px]/relaxed">
-          <p>{note}</p>
+          <p className="font-bold">{verdict}</p>
+          <p>{seniorityNote}</p>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:gap-8">
             <SplitRead
@@ -794,7 +968,7 @@ function SplitRead({
 }
 
 function ProfileRead({ report }: { report: Report }) {
-  const { profile } = report;
+  const { profile, positioning, positioningLine } = report;
   if (profile.matches && !profile.resumeAlternative) return null;
 
   return (
@@ -804,8 +978,7 @@ function ProfileRead({ report }: { report: Report }) {
           <p className="text-[14px]/relaxed">
             You come across as a {profileName(profile.resumeReads)}, which is
             what this role is after — though it was a close call, and{" "}
-            {profileName(profile.resumeAlternative!)} nearly won. Make the first
-            third of your resume settle the question.
+            {profileName(profile.resumeAlternative!)} nearly won.
           </p>
         ) : (
           <>
@@ -819,15 +992,47 @@ function ProfileRead({ report }: { report: Report }) {
               </span>
             </div>
             <p className="text-[14px]/relaxed">
-              This is the one to fix first. A screener decides what kind of
-              person you are in about ten seconds, and everything after that
-              gets read through it — so a perfect skills match further down
-              often never gets reached.
+              A screener decides what kind of person you are in about ten
+              seconds, and everything after that gets read through it — so a
+              perfect skills match further down often never gets reached.
               {profile.uncertain &&
                 " Both reads carried some doubt, so weigh it alongside the detail below."}
             </p>
           </>
         )}
+
+        {positioning && (
+          <div className="mt-4 border-t border-dashed border-[var(--muted)] pt-4">
+            <p className="mb-3 text-[13px]/relaxed">
+              <strong>What to do:</strong> this one line sets the frame. Rewrite
+              it and the rest of your resume gets read differently.
+            </p>
+            <div className="flex flex-col gap-3">
+              <div>
+                <p className="mb-1.5 text-[11px] uppercase tracking-widest text-[var(--muted)]">
+                  {positioningLine
+                    ? `Line ${positioningLine.line} of your resume`
+                    : "Your opening line"}
+                </p>
+                <p className="border-l-4 border-[var(--muted)] bg-black/[0.04] px-3.5 py-2.5 text-[13px]/relaxed line-through decoration-[var(--bad)]/60">
+                  {positioning.current_line}
+                </p>
+              </div>
+              <div>
+                <p className="mb-1.5 text-[11px] uppercase tracking-widest text-[var(--muted)]">
+                  Change it to
+                </p>
+                <p className="border-l-4 border-[var(--good)] bg-[var(--good)]/[0.08] px-3.5 py-2.5 text-[13px]/relaxed font-medium">
+                  {positioning.replacement}
+                </p>
+              </div>
+            </div>
+            <p className="mt-3 text-[12px]/relaxed text-[var(--muted)]">
+              Why: {positioning.why}
+            </p>
+          </div>
+        )}
+
         <p className="mt-3 text-[12px]/relaxed text-[var(--muted)]">
           What they&apos;re after: {TALENT_PROFILES[profile.roleWants]}
         </p>

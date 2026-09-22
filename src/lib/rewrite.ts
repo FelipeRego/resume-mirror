@@ -18,6 +18,17 @@ import type { DimensionResult } from "./screen";
 const MODEL = "gpt-5.4";
 
 const HintSchema = z.object({
+  /**
+   * The summary line rewrite. Null when there is nothing to fix — either the
+   * positioning already matches, or no line was anchored.
+   */
+  positioning: z
+    .object({
+      current_line: z.string(),
+      replacement: z.string(),
+      why: z.string(),
+    })
+    .nullable(),
   hints: z.array(
     z.object({
       dimension_id: z.string(),
@@ -61,14 +72,26 @@ The resume has nothing to build on here. Do not invent, do not stretch an unrela
 - evidence_missing: true.
 - how_to_earn_it: two concrete, genuinely achievable things that would let them make the claim honestly. Specific actions, not "gain experience".
 
+POSITIONING. You may also be given positioning: the kind of practitioner the ad is hiring, the kind the resume currently reads as, and the one line that most sets that impression. When those two kinds differ, rewrite that line so it frames the same real experience for the role being applied for. This is reframing, not reinvention — every claim must still be true of the resume you were given. If the two kinds already match, or no line was given, return null for positioning.
+
 Write in Australian English. Address them as "you". Never use the words "leverage", "utilise", "synergy", "spearheaded" or "passionate".`;
+
+export type Positioning = z.infer<typeof HintSchema>["positioning"];
 
 export async function rewriteHints(
   resume: string,
   jobAd: string,
   gaps: DimensionResult[],
-): Promise<RewriteHint[]> {
-  if (gaps.length === 0) return [];
+  positioning: {
+    roleWants: string;
+    resumeReads: string;
+    matches: boolean;
+    line: { line: number; text: string } | null;
+  },
+): Promise<{ hints: RewriteHint[]; positioning: Positioning }> {
+  if (gaps.length === 0 && positioning.matches) {
+    return { hints: [], positioning: null };
+  }
 
   const client = new OpenAI();
 
@@ -79,6 +102,13 @@ export async function rewriteHints(
       {
         job_ad: jobAd,
         resume,
+        positioning: positioning.matches
+          ? null
+          : {
+              ad_is_hiring_a: positioning.roleWants.replace(/_/g, " "),
+              resume_currently_reads_as: positioning.resumeReads.replace(/_/g, " "),
+              line_that_sets_the_impression: positioning.line?.text ?? null,
+            },
         gaps: gaps.map((g) => ({
           dimension_id: g.id,
           what_is_missing: g.label,
@@ -96,5 +126,8 @@ export async function rewriteHints(
     text: { format: zodTextFormat(HintSchema, "rewrite_hints") },
   });
 
-  return response.output_parsed?.hints ?? [];
+  return {
+    hints: response.output_parsed?.hints ?? [],
+    positioning: response.output_parsed?.positioning ?? null,
+  };
 }
