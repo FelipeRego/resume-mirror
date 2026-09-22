@@ -418,27 +418,44 @@ function LoadingDialog() {
   );
 }
 
-function Meter({ value, color }: { value: number; color: string }) {
+function Meter({
+  value,
+  target,
+  color,
+}: {
+  value: number;
+  target?: number;
+  color: string;
+}) {
   const cells = 20;
   const exact = value * cells;
   const full = Math.floor(exact);
   const partial = exact - full;
 
   return (
-    <div className="meter" style={{ ["--cell" as string]: color }}>
-      {Array.from({ length: cells }, (_, i) => (
+    <div className="meter-wrap">
+      <div className="meter" style={{ ["--cell" as string]: color }}>
+        {Array.from({ length: cells }, (_, i) => (
+          <span
+            key={i}
+            className="meter-cell"
+            data-on={i < full}
+            data-partial={i === full && partial > 0.05}
+            style={
+              i === full && partial > 0.05
+                ? ({ ["--fill" as string]: `${partial * 100}%` } as React.CSSProperties)
+                : undefined
+            }
+          />
+        ))}
+      </div>
+      {target !== undefined && (
         <span
-          key={i}
-          className="meter-cell"
-          data-on={i < full}
-          data-partial={i === full && partial > 0.05}
-          style={
-            i === full && partial > 0.05
-              ? ({ ["--fill" as string]: `${partial * 100}%` } as React.CSSProperties)
-              : undefined
-          }
+          className="meter-target"
+          style={{ left: `${Math.min(100, target * 100)}%` }}
+          aria-hidden
         />
-      ))}
+      )}
     </div>
   );
 }
@@ -447,78 +464,40 @@ function Results({ report }: { report: Report }) {
   const hintFor = (id: string) =>
     report.hints.find((h) => h.dimension_id === id);
 
+  // Biggest problem first. The server sorts by importance for other callers;
+  // here the reader wants a to-do list, not a copy of the job ad.
+  const byCost = [...report.dimensions].sort((a, b) => b.cost - a.cost);
+
   return (
     <div className="mt-8 flex flex-col gap-6">
       <Headline report={report} />
       <ProfileRead report={report} />
 
-      <Window title="What this job wants, against what you show">
-        <div className="flex flex-col gap-4 p-5">
-          {report.dimensions.map((d) => (
-            <div key={d.id} className="break-inside-avoid">
-              <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
-                <span className="text-[14px] font-bold uppercase tracking-wide">
-                  {d.label}
-                  {d.uncertain && (
-                    <span className="ml-2 text-[12px] font-normal normal-case text-[var(--muted)]">
-                      couldn&apos;t read this clearly
-                    </span>
-                  )}
-                </span>
-                <span className="text-[12px] tabular-nums text-[var(--muted)]">
-                  this job: {pct(d.importance)} · you: {pct(d.demonstrated)}
-                </span>
-              </div>
-              <Meter
-                value={d.demonstrated}
-                color={
-                  d.uncertain
-                    ? "var(--muted)"
-                    : d.cost > 0.35
-                      ? "var(--bad)"
-                      : d.cost > 0.15
-                        ? "var(--warn)"
-                        : "var(--good)"
-                }
-              />
-              <p className="mt-1.5 text-[12px]/relaxed text-[var(--muted)]">
-                Right now yours reads as: {d.currentLevel.toLowerCase()}
-              </p>
-            </div>
-          ))}
+      <Window title="What this job wants, and where you stand" tone="accent">
+        <div className="p-5">
+          <p className="text-[13px]/relaxed text-[var(--muted)]">
+            One row per thing this ad asks for, biggest problem first. The bar
+            is how much you show; the ▼ marker is where this job wants you.
+          </p>
+          <ColourKey />
+
+          <div className="mt-5 flex flex-col gap-5">
+            {byCost.map((d) => (
+              <DimensionRow key={d.id} d={d} hint={hintFor(d.id)} />
+            ))}
+          </div>
 
           {report.unreadable.length > 0 && (
-            <p className="mt-1 border border-dashed border-[var(--muted)] p-3 text-[12px]/relaxed text-[var(--muted)]">
+            <p className="mt-5 border border-dashed border-[var(--muted)] p-3 text-[12px]/relaxed text-[var(--muted)]">
               We couldn&apos;t get a clear read on{" "}
               {report.unreadable.map((d) => d.label.toLowerCase()).join(" or ")},
-              so {report.unreadable.length === 1 ? "it is" : "they are"} left out
-              of the advice below. That usually means your resume is genuinely
-              ambiguous on the point — which is worth fixing on its own.
+              so {report.unreadable.length === 1 ? "it is" : "they are"} shown in
+              grey and left out of the advice. That usually means your resume is
+              genuinely ambiguous on the point — which is worth fixing on its own.
             </p>
           )}
         </div>
       </Window>
-
-      {report.gaps.length > 0 && (
-        <Window title="The lines to change, most costly first" tone="accent">
-          <div className="p-5">
-            <p className="mb-4 text-[13px]/relaxed text-[var(--muted)]">
-              Ranked by how badly this job wants it against how little you show
-              — not simply by your lowest scores.
-            </p>
-            {report.hintsError && (
-              <p className="mb-4 border border-[var(--ink)] bg-[var(--accent)] p-3 text-[12px]/relaxed">
-                {report.hintsError}
-              </p>
-            )}
-            <div className="flex flex-col gap-5">
-              {report.gaps.map((gap) => (
-                <GapCard key={gap.id} gap={gap} hint={hintFor(gap.id)} />
-              ))}
-            </div>
-          </div>
-        </Window>
-      )}
 
       {report.strengths.length > 0 && (
         <Window title="Lead with these">
@@ -546,84 +525,176 @@ function Results({ report }: { report: Report }) {
 
       <HowItReads report={report} />
 
-      <Window title="Run info">
-        <p className="p-4 text-[12px]/relaxed text-[var(--muted)]">
-          {report.model} · {report.dimensions.length} things this ad asks for ·
-          4 passes · {report.usage.inputTokens.toLocaleString()} input tokens.
-          These numbers are one reader&apos;s judgment, carefully made — not a
-          verdict on you.
-        </p>
+      <Window title="How this was worked out">
+        <div className="flex flex-col gap-2 p-4 text-[12px]/relaxed text-[var(--muted)]">
+          <p>
+            We read the ad first and worked out{" "}
+            {report.dimensions.length} things it&apos;s really asking for. Then
+            we read your resume on its own, so the ad couldn&apos;t colour the
+            reading. Then we compared the two, and finally went looking for the
+            exact lines worth changing.
+          </p>
+          <p>
+            Where the reading wasn&apos;t clear, we&apos;ve said so rather than
+            guessed. This is one careful reader&apos;s judgment of a document —
+            not a verdict on you, and not what any particular employer will
+            think.
+          </p>
+        </div>
       </Window>
     </div>
   );
 }
 
-/** One gap. Either a line to rewrite, or an honest "this isn't here". */
-function GapCard({ gap, hint }: { gap: Report["gaps"][number]; hint?: RewriteHint }) {
-  const missing = hint?.evidence_missing ?? !gap.anchor;
+/**
+ * Colour encodes cost — how much a shortfall actually costs this application,
+ * which is importance multiplied by how far short you fall. That is the right
+ * measure to rank by, but it is not guessable from a coloured bar, so it gets
+ * stated rather than left for the reader to infer.
+ */
+function ColourKey() {
+  const items: [string, string][] = [
+    ["var(--bad)", "costing you the most"],
+    ["var(--warn)", "worth fixing"],
+    ["var(--good)", "already clear"],
+    ["var(--muted)", "couldn't read it"],
+  ];
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 border border-dashed border-[var(--muted)] p-2.5">
+      <span className="text-[11px] uppercase tracking-widest text-[var(--muted)]">
+        Bar colour
+      </span>
+      {items.map(([c, label]) => (
+        <span key={label} className="flex items-center gap-1.5 text-[12px]">
+          <span
+            className="inline-block h-3 w-3 border border-[var(--ink)]"
+            style={{ background: c }}
+          />
+          {label}
+        </span>
+      ))}
+      <span className="text-[11px]/relaxed text-[var(--muted)]">
+        (how far short × how much this job cares — not your score)
+      </span>
+    </div>
+  );
+}
+
+function barColour(d: Report["dimensions"][number]) {
+  if (d.uncertain) return "var(--muted)";
+  if (d.cost > 0.35) return "var(--bad)";
+  if (d.cost > 0.15) return "var(--warn)";
+  return "var(--good)";
+}
+
+/**
+ * One dimension: the bar, and directly beneath it the fix, if there is one.
+ * Keeping these together is the point — the diagnosis and the thing to do
+ * about it were previously in two different sections.
+ */
+function DimensionRow({
+  d,
+  hint,
+}: {
+  d: Report["dimensions"][number];
+  hint?: RewriteHint;
+}) {
+  const shortfall = Math.max(0, d.importance - d.demonstrated);
+  const cleared = d.demonstrated >= d.importance;
+  const missing = hint?.evidence_missing ?? false;
 
   return (
     <article className="break-inside-avoid border border-[var(--ink)] p-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-[15px] font-bold uppercase tracking-wide">
-          {gap.label}
+      <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
+        <h3 className="text-[14px] font-bold uppercase tracking-wide">
+          {d.label}
+          {d.uncertain && (
+            <span className="ml-2 text-[12px] font-normal normal-case text-[var(--muted)]">
+              couldn&apos;t read this clearly
+            </span>
+          )}
         </h3>
-        {missing && (
-          <span className="border border-[var(--ink)] bg-[var(--accent)] px-2 py-0.5 text-[11px] uppercase tracking-wider">
-            Not in your resume yet
-          </span>
-        )}
+        <span className="text-[12px] tabular-nums text-[var(--muted)]">
+          this job wants {pct(d.importance)} · you show {pct(d.demonstrated)}
+        </span>
       </div>
 
-      {hint && <p className="mt-2.5 text-[14px]/relaxed">{hint.diagnosis}</p>}
+      <Meter value={d.demonstrated} target={d.importance} color={barColour(d)} />
 
-      {!missing && hint?.current_line && hint.replacement && (
-        <div className="mt-4 flex flex-col gap-3">
-          <div>
-            <p className="mb-1.5 text-[11px] uppercase tracking-widest text-[var(--muted)]">
-              {!gap.anchor
-                ? "Your line"
-                : gap.anchor.uncertain
-                  ? `Probably line ${gap.anchor.line} — worth checking this is the right one`
-                  : `Line ${gap.anchor.line} of your resume`}
+      <p className="mt-2 text-[12px]/relaxed text-[var(--muted)]">
+        {cleared ? (
+          <>You&apos;re past what this job asks for here. </>
+        ) : (
+          <>
+            You&apos;re{" "}
+            <strong className="text-[var(--ink)]">
+              {Math.round(shortfall * 100)} points short
+            </strong>{" "}
+            of where the ▼ sits.{" "}
+          </>
+        )}
+        Right now yours reads as: {d.currentLevel.toLowerCase()}
+      </p>
+
+      {hint && (
+        <div className="mt-4 border-t border-dashed border-[var(--muted)] pt-3.5">
+          {missing && (
+            <span className="mb-2 inline-block border border-[var(--ink)] bg-[var(--accent)] px-2 py-0.5 text-[11px] uppercase tracking-wider">
+              Not in your resume yet
+            </span>
+          )}
+
+          <p className="text-[14px]/relaxed">{hint.diagnosis}</p>
+
+          {!missing && hint.current_line && hint.replacement && (
+            <div className="mt-3.5 flex flex-col gap-3">
+              <div>
+                <p className="mb-1.5 text-[11px] uppercase tracking-widest text-[var(--muted)]">
+                  {!d.anchor
+                    ? "Your line"
+                    : d.anchor.uncertain
+                      ? `Probably line ${d.anchor.line} — worth checking this is the right one`
+                      : `Line ${d.anchor.line} of your resume`}
+                </p>
+                <p className="border-l-4 border-[var(--muted)] bg-black/[0.04] px-3.5 py-2.5 text-[13px]/relaxed line-through decoration-[var(--bad)]/60">
+                  {hint.current_line}
+                </p>
+              </div>
+              <div>
+                <p className="mb-1.5 text-[11px] uppercase tracking-widest text-[var(--muted)]">
+                  Change it to
+                </p>
+                <p className="border-l-4 border-[var(--good)] bg-[var(--good)]/[0.08] px-3.5 py-2.5 text-[13px]/relaxed font-medium">
+                  {hint.replacement}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {missing && hint.how_to_earn_it.length > 0 && (
+            <div className="mt-3.5">
+              <p className="mb-2 text-[11px] uppercase tracking-widest text-[var(--muted)]">
+                How to genuinely earn this
+              </p>
+              <ul className="flex flex-col gap-2">
+                {hint.how_to_earn_it.map((t, i) => (
+                  <li
+                    key={i}
+                    className="border-l-4 border-[var(--brand-blue-bright)] bg-black/[0.04] px-3.5 py-2.5 text-[13px]/relaxed"
+                  >
+                    {t}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {hint.why && (
+            <p className="mt-3 text-[12px]/relaxed text-[var(--muted)]">
+              Why: {hint.why}
             </p>
-            <p className="border-l-4 border-[var(--muted)] bg-black/[0.04] px-3.5 py-2.5 text-[13px]/relaxed line-through decoration-[var(--bad)]/60">
-              {hint.current_line}
-            </p>
-          </div>
-          <div>
-            <p className="mb-1.5 text-[11px] uppercase tracking-widest text-[var(--muted)]">
-              Change it to
-            </p>
-            <p className="border-l-4 border-[var(--good)] bg-[var(--good)]/[0.08] px-3.5 py-2.5 text-[13px]/relaxed font-medium">
-              {hint.replacement}
-            </p>
-          </div>
+          )}
         </div>
-      )}
-
-      {missing && hint && hint.how_to_earn_it.length > 0 && (
-        <div className="mt-4">
-          <p className="mb-2 text-[11px] uppercase tracking-widest text-[var(--muted)]">
-            How to genuinely earn this
-          </p>
-          <ul className="flex flex-col gap-2">
-            {hint.how_to_earn_it.map((s, i) => (
-              <li
-                key={i}
-                className="border-l-4 border-[var(--brand-blue-bright)] bg-black/[0.04] px-3.5 py-2.5 text-[13px]/relaxed"
-              >
-                {s}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {hint?.why && (
-        <p className="mt-3 text-[12px]/relaxed text-[var(--muted)]">
-          Why: {hint.why}
-        </p>
       )}
     </article>
   );
@@ -633,7 +704,7 @@ function Headline({ report }: { report: Report }) {
   const { seniority, experience } = report;
 
   const note = seniority.uncertain
-    ? "Seniority was hard to read on one side or the other, so take this loosely."
+    ? "The two reads are close enough that the level is genuinely arguable — see the split below."
     : seniority.delta === 0
       ? "You're pitching at the right level for this one."
       : seniority.delta < 0
@@ -642,7 +713,7 @@ function Headline({ report }: { report: Report }) {
 
   return (
     <Window title="How you'd land" tone="accent">
-      <div className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:gap-8">
+      <div className="flex flex-col gap-5 p-5 sm:flex-row sm:items-start sm:gap-8">
         <div className="shrink-0">
           <div className="text-6xl font-bold tabular-nums leading-none">
             {pct(report.fit)}
@@ -651,15 +722,25 @@ function Headline({ report }: { report: Report }) {
             weighted fit
           </div>
         </div>
-        <div className="flex flex-col gap-3 text-[14px]/relaxed">
-          <div className="flex flex-wrap gap-x-7 gap-y-2">
-            <Stat label="This job wants" value={SENIORITY_LABEL[seniority.required]} />
-            <Stat label="You read as" value={SENIORITY_LABEL[seniority.demonstrated]} />
-            <Stat label="Experience" value={`~${Math.round(experience.years)} YRS`} />
-          </div>
+        <div className="flex min-w-0 flex-col gap-4 text-[14px]/relaxed">
           <p>{note}</p>
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:gap-8">
+            <SplitRead
+              label="This ad reads as"
+              top={SENIORITY_LABEL[seniority.required]}
+              split={seniority.requiredSplit}
+            />
+            <SplitRead
+              label="Your resume reads as"
+              top={SENIORITY_LABEL[seniority.demonstrated]}
+              split={seniority.demonstratedSplit}
+            />
+          </div>
+
           <p className="text-[13px] text-[var(--muted)]">
-            Your history reads as {PROGRESSION_LABEL[experience.progression]}
+            About {Math.round(experience.years)} years of experience, reading as{" "}
+            {PROGRESSION_LABEL[experience.progression]}
             {experience.progressionUncertain && ", though not clear-cut"}.
           </p>
         </div>
@@ -668,14 +749,47 @@ function Headline({ report }: { report: Report }) {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+/**
+ * Shows the answer and the probability behind it. A 45/40 split and a 95/3
+ * split produce the same headline word, and the reader deserves to know which
+ * one they are looking at.
+ */
+function SplitRead({
+  label,
+  top,
+  split,
+}: {
+  label: string;
+  top: string;
+  split: { option: string; p: number }[];
+}) {
   return (
-    <span className="flex flex-col">
-      <span className="text-[11px] uppercase tracking-widest text-[var(--muted)]">
+    <div className="min-w-0 flex-1">
+      <div className="text-[11px] uppercase tracking-widest text-[var(--muted)]">
         {label}
-      </span>
-      <span className="text-[15px] font-bold">{value}</span>
-    </span>
+      </div>
+      <div className="mt-0.5 text-[15px] font-bold">{top}</div>
+      {split.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-1">
+          {split.map((row, i) => (
+            <li key={row.option} className="flex items-center gap-2 text-[12px]">
+              <span className="w-24 shrink-0 truncate text-[var(--muted)]">
+                {SENIORITY_LABEL[row.option]?.toLowerCase() ?? row.option}
+              </span>
+              <span className="h-2.5 min-w-[2px] border border-[var(--ink)]"
+                style={{
+                  width: `${Math.max(2, row.p * 100)}%`,
+                  background: i === 0 ? "var(--accent)" : "transparent",
+                }}
+              />
+              <span className="shrink-0 tabular-nums text-[var(--muted)]">
+                {Math.round(row.p * 100)}%
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

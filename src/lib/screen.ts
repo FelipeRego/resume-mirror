@@ -111,6 +111,10 @@ export type ScreenResult = {
     delta: number;
     /** True when either read was too uncertain to lean on. */
     uncertain: boolean;
+    /** How the ad's seniority probability was spread. */
+    requiredSplit: Split<SeniorityLevel>;
+    /** How the resume's seniority probability was spread. */
+    demonstratedSplit: Split<SeniorityLevel>;
   };
   profile: {
     roleWants: TalentProfile;
@@ -154,6 +158,9 @@ function client(options: ScreenOptions = {}) {
 
 type Answers = Record<string, unknown>;
 
+/** A Choice's probability spread, ranked, trimmed to what is worth showing. */
+export type Split<T extends string = string> = { option: T; p: number }[];
+
 const asNoul = (a: Answers, key: string): number => {
   const v = a[key] as { type?: string; noul?: number } | undefined;
   return v?.type === "noul" ? (v.noul ?? 0) : 0;
@@ -163,17 +170,29 @@ const asChoice = <T extends string>(
   a: Answers,
   key: string,
   fallback: T,
-): { value: T; confidence: number; runnerUp: T | null } => {
+): {
+  value: T;
+  confidence: number;
+  runnerUp: T | null;
+  split: Split<T>;
+} => {
   const v = a[key] as
     | { type?: string; choice?: string; confidence?: number; probabilities?: Record<string, number> }
     | undefined;
-  if (v?.type !== "choice") return { value: fallback, confidence: 0, runnerUp: null };
+  if (v?.type !== "choice")
+    return { value: fallback, confidence: 0, runnerUp: null, split: [] };
 
   const ranked = Object.entries(v.probabilities ?? {}).sort((x, y) => y[1] - x[1]);
   return {
     value: (v.choice ?? fallback) as T,
     confidence: v.confidence ?? 0,
     runnerUp: (ranked[1]?.[0] as T) ?? null,
+    // Only the options that carry real probability. A 17-way choice has a long
+    // tail of zeroes that tells the reader nothing.
+    split: ranked
+      .filter(([, p]) => p >= 0.02)
+      .slice(0, 4)
+      .map(([option, p]) => ({ option: option as T, p })),
   };
 };
 
@@ -604,6 +623,8 @@ export async function screen(
       uncertain:
         role.seniority.confidence < MIN_CHOICE_CONFIDENCE ||
         candidateSeniority.confidence < MIN_CHOICE_CONFIDENCE,
+      requiredSplit: role.seniority.split,
+      demonstratedSplit: candidateSeniority.split,
     },
     profile: {
       roleWants: role.profile.value,

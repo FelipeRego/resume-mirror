@@ -231,3 +231,33 @@ body {
     color: #555;
   }
 }
+
+/* --- target marker on a meter ------------------------------------------- */
+/*
+ * The fill says what you show; the marker says what the job wants. Without the
+ * marker the bar draws one number and silently omits the one the whole report
+ * is about.
+ */
+.meter-wrap {
+  position: relative;
+}
+
+.meter-target {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--ink);
+  transform: translateX(-1px);
+  pointer-events: none;
+}
+
+.meter-target::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--ink);
+}
