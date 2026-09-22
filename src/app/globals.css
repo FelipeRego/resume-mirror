@@ -1,26 +1,180 @@
 @import "tailwindcss";
 
+/*
+ * Retro desktop-OS treatment, in the feliperego.com palette rather than
+ * TypeSafe's pink. Every colour is a token here — swapping the whole app to
+ * another brand is an edit to this block and nothing else.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --brand-blue: #204fc9;
+  --brand-blue-bright: #2563eb;
+  --brand-yellow: #fde047;
+  --ink: #0c0a09;
+  --paper: #f4f4f2;
+  --chrome: #d8d8d4;
+  --chrome-dark: #b4b4ae;
+
+  /* Semantic roles, so components never name a brand colour directly. */
+  --desktop: var(--brand-blue);
+  --window-bg: var(--paper);
+  --window-title-bg: var(--ink);
+  --window-title-fg: var(--paper);
+  --accent: var(--brand-yellow);
+  --good: #16a34a;
+  --warn: var(--brand-yellow);
+  --bad: #dc2626;
+  --muted: #8a8a85;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-desktop: var(--desktop);
+  --color-window: var(--window-bg);
+  --color-ink: var(--ink);
+  --color-accent: var(--accent);
+  --color-chrome: var(--chrome);
+  --color-chrome-dark: var(--chrome-dark);
+  --font-mono: var(--font-mono);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--desktop);
+  color: var(--ink);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  /* 1-bit dot screen over the blue, the way the reference dithers its pink. */
+  background-image: radial-gradient(
+    rgba(255, 255, 255, 0.22) 1px,
+    transparent 1px
+  );
+  background-size: 4px 4px;
+}
+
+/* --- window chrome ------------------------------------------------------ */
+
+.win {
+  background: var(--window-bg);
+  border: 1px solid var(--ink);
+  /* Hard offset shadow, never blurred — this is the whole retro tell. */
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+.win-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  background: var(--window-title-bg);
+  color: var(--window-title-fg);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+/* The decorative close/resize boxes in the title bar. */
+.win-btn {
+  width: 0.6875rem;
+  height: 0.6875rem;
+  border: 1px solid var(--window-title-fg);
+  flex: none;
+}
+
+/* Inset field, the way an old dialog sinks its inputs. */
+.sunken {
+  background: #fff;
+  border: 1px solid var(--ink);
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.18);
+}
+
+/* Raised control. */
+.raised {
+  background: var(--chrome);
+  border: 1px solid var(--ink);
+  box-shadow:
+    inset -1px -1px 0 var(--chrome-dark),
+    inset 1px 1px 0 #fff;
+}
+
+.raised:active:not(:disabled) {
+  box-shadow:
+    inset 1px 1px 0 var(--chrome-dark),
+    inset -1px -1px 0 #fff;
+}
+
+/* Registration marks, as on the reference site's corners. */
+.crop::before,
+.crop::after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-color: rgba(255, 255, 255, 0.5);
+  border-style: solid;
+}
+
+.crop::before {
+  top: 0;
+  left: 0;
+  border-width: 1px 0 0 1px;
+}
+
+.crop::after {
+  bottom: 0;
+  right: 0;
+  border-width: 0 1px 1px 0;
+}
+
+/* Segmented meter: blocks, not a smooth rounded bar. */
+.meter {
+  display: flex;
+  gap: 2px;
+  height: 0.75rem;
+}
+
+.meter-cell {
+  flex: 1 1 0;
+  border: 1px solid var(--ink);
+  background: #fff;
+}
+
+.meter-cell[data-on="true"] {
+  background: var(--cell, var(--ink));
+}
+
+.meter-cell[data-partial="true"] {
+  /* Half-lit cell, drawn as a hard 50% split rather than an opacity fade. */
+  background: linear-gradient(
+    90deg,
+    var(--cell, var(--ink)) var(--fill, 50%),
+    #fff var(--fill, 50%)
+  );
+}
+
+/* Marching-ants progress fill for the loading dialog. */
+@keyframes ants {
+  to {
+    background-position: 16px 0;
+  }
+}
+
+.ants {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--ink) 0 4px,
+    transparent 4px 8px
+  );
+  background-size: 16px 16px;
+  animation: ants 0.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ants {
+    animation: none;
+  }
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--ink);
 }
