@@ -178,3 +178,56 @@ body {
   background: var(--accent);
   color: var(--ink);
 }
+
+/* --- print / save-as-PDF ------------------------------------------------- */
+/*
+ * The report is the deliverable, so printing drops the dithered desktop, the
+ * paste boxes and the controls, and keeps every window from splitting across
+ * a page break.
+ */
+@media print {
+  @page {
+    margin: 14mm;
+  }
+
+  body {
+    background: #fff !important;
+    background-image: none !important;
+    color: #000;
+  }
+
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .win {
+    /* A hard shadow costs ink and adds nothing on paper. */
+    box-shadow: none;
+    border: 1px solid #000;
+    break-inside: avoid;
+  }
+
+  .win-title {
+    background: #000 !important;
+    color: #fff !important;
+    /* Without this, most browsers drop the title bar's fill entirely. */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .meter-cell {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .ants {
+    animation: none;
+  }
+
+  a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    color: #555;
+  }
+}

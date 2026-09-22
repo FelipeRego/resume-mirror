@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import Image from "next/image";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { TALENT_PROFILES } from "@/lib/dimensions";
+import { redact, type Redaction } from "@/lib/redact";
 import type { RewriteHint } from "@/lib/rewrite";
 import type { ScreenResult } from "@/lib/screen";
 
@@ -45,11 +47,21 @@ const PROGRESSION_LABEL: Record<string, string> = {
   unclear: "hard to read",
 };
 
+const REDACTION_LABEL: Record<string, string> = {
+  name: "Name",
+  email: "Email",
+  phone: "Phone",
+  url: "Profile link",
+  location: "Location",
+  custom: "Your own term",
+};
+
 const PASSES = [
   "Reading the job ad",
   "Reading your resume",
   "Comparing the two",
-  "Writing suggestions",
+  "Finding the exact lines",
+  "Writing your rewrites",
 ];
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
@@ -58,9 +70,16 @@ const profileName = (p: string) => PROFILE_LABEL[p] ?? p.replace(/_/g, " ");
 export default function Home() {
   const [resume, setResume] = useState("");
   const [jobAd, setJobAd] = useState("");
+  const [extraTerms, setExtraTerms] = useState<string[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Runs entirely in the browser. Nothing has been sent at this point.
+  const scrubbed = useMemo(
+    () => redact(resume, extraTerms),
+    [resume, extraTerms],
+  );
 
   async function run() {
     setBusy(true);
@@ -71,7 +90,8 @@ export default function Home() {
       const res = await fetch("/api/screen", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resume, jobAd }),
+        // The redacted text, never the original.
+        body: JSON.stringify({ resume: scrubbed.text, jobAd }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Something went wrong.");
@@ -86,18 +106,20 @@ export default function Home() {
   const ready = resume.length >= 100 && jobAd.length >= 100;
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
-      <header className="crop relative mb-8 px-3 py-6 sm:px-6">
-        <h1 className="text-2xl font-bold tracking-tight text-white sm:text-4xl">
+    <main className="mx-auto w-full max-w-[1400px] px-4 py-8 sm:px-8 sm:py-12">
+      <header className="crop relative mb-8 px-3 py-6 sm:px-6 print:hidden">
+        <h1 className="text-3xl font-bold tracking-tight text-white sm:text-5xl">
           RESUME MIRROR
         </h1>
-        <p className="mt-2 max-w-2xl text-[13px]/relaxed text-white/85">
-          Screening tools read your resume before a person does. This runs the
-          same kind of judgment on your side of the table.
+        <p className="mt-3 max-w-3xl text-[15px]/relaxed text-white/90">
+          Most resumes are read by software before a person ever sees them.
+          Paste yours and the ad you&apos;re going for, and you&apos;ll get the
+          same read a screener gets — which lines are letting you down, what to
+          write instead, and what this job is really asking for.
         </p>
       </header>
 
-      <div className="grid gap-5 sm:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-2 print:hidden">
         <Window title="Your resume.txt">
           <Paste
             value={resume}
@@ -114,18 +136,36 @@ export default function Home() {
         </Window>
       </div>
 
-      <div className="mt-5 flex flex-wrap items-center gap-4">
+      {resume.length > 0 && (
+        <PrivacyCheck
+          found={scrubbed.found}
+          extraTerms={extraTerms}
+          onAddTerm={(t) => setExtraTerms((xs) => [...xs, t])}
+          onRemoveTerm={(t) => setExtraTerms((xs) => xs.filter((x) => x !== t))}
+          preview={scrubbed.text}
+        />
+      )}
+
+      <div className="mt-6 flex flex-wrap items-center gap-4 print:hidden">
         <button
           onClick={run}
           disabled={busy || !ready}
-          className="raised px-5 py-2 text-xs font-bold uppercase tracking-widest disabled:cursor-not-allowed disabled:opacity-50"
+          className="raised px-6 py-2.5 text-[13px] font-bold uppercase tracking-widest disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy ? "Working…" : "Screen my resume"}
         </button>
         {!ready && !busy && (
-          <span className="text-[11px] uppercase tracking-wider text-white/65">
+          <span className="text-[12px] uppercase tracking-wider text-white/70">
             Paste both to continue
           </span>
+        )}
+        {report && (
+          <button
+            onClick={() => window.print()}
+            className="raised px-5 py-2.5 text-[13px] font-bold uppercase tracking-widest"
+          >
+            Save as PDF
+          </button>
         )}
       </div>
 
@@ -137,15 +177,13 @@ export default function Home() {
             <span>Error</span>
             <span className="win-btn" />
           </div>
-          <p className="p-4 text-[13px]/relaxed">{error}</p>
+          <p className="p-5 text-[14px]/relaxed">{error}</p>
         </div>
       )}
 
       {report && <Results report={report} />}
 
-      <footer className="mt-10 px-1 text-[11px]/relaxed text-white/55">
-        Built on TypeSafe · Jev returns the judgments, code does the arithmetic.
-      </footer>
+      <Footer />
     </main>
   );
 }
@@ -157,22 +195,23 @@ function Window({
 }: {
   title: string;
   children: ReactNode;
-  tone?: "accent";
+  tone?: "accent" | "warn";
 }) {
+  const bg =
+    tone === "accent"
+      ? "var(--brand-blue-bright)"
+      : tone === "warn"
+        ? "var(--brand-yellow)"
+        : undefined;
+  const fg = tone === "warn" ? "var(--ink)" : undefined;
+
   return (
-    <section className="win">
-      <div
-        className="win-title"
-        style={
-          tone === "accent"
-            ? { background: "var(--brand-blue-bright)" }
-            : undefined
-        }
-      >
+    <section className="win break-inside-avoid">
+      <div className="win-title" style={{ background: bg, color: fg }}>
         <span className="truncate">{title}</span>
         <span className="flex gap-1">
-          <span className="win-btn" />
-          <span className="win-btn" />
+          <span className="win-btn" style={{ borderColor: fg }} />
+          <span className="win-btn" style={{ borderColor: fg }} />
         </span>
       </div>
       {children}
@@ -190,16 +229,16 @@ function Paste({
   placeholder: string;
 }) {
   return (
-    <div className="p-2">
+    <div className="p-3">
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        rows={13}
+        rows={14}
         spellCheck={false}
-        className="sunken w-full resize-y p-2.5 text-[12px]/relaxed outline-none placeholder:text-[var(--muted)] focus:shadow-[inset_2px_2px_0_rgba(0,0,0,0.18),0_0_0_2px_var(--brand-yellow)]"
+        className="sunken w-full resize-y p-3 text-[13px]/relaxed outline-none placeholder:text-[var(--muted)] focus:shadow-[inset_2px_2px_0_rgba(0,0,0,0.18),0_0_0_3px_var(--brand-yellow)]"
       />
-      <div className="mt-1.5 flex justify-between text-[10px] uppercase tracking-wider text-[var(--muted)]">
+      <div className="mt-2 flex justify-between text-[11px] uppercase tracking-wider text-[var(--muted)]">
         <span>{value.length < 100 ? "min 100 chars" : "ready"}</span>
         <span>{value.length.toLocaleString()} chars</span>
       </div>
@@ -207,41 +246,178 @@ function Paste({
   );
 }
 
-/** Stands in for the ~10s the three passes take. Purely cosmetic pacing. */
+/**
+ * The honest part of the privacy story: show the candidate exactly what is
+ * being removed and let them add anything the patterns missed, before a single
+ * byte leaves the browser.
+ */
+function PrivacyCheck({
+  found,
+  extraTerms,
+  onAddTerm,
+  onRemoveTerm,
+  preview,
+}: {
+  found: Redaction[];
+  extraTerms: string[];
+  onAddTerm: (t: string) => void;
+  onRemoveTerm: (t: string) => void;
+  preview: string;
+}) {
+  const [draft, setDraft] = useState("");
+  const [showPreview, setShowPreview] = useState(false);
+
+  // One chip per distinct original string, not one per occurrence.
+  const unique = useMemo(() => {
+    const seen = new Map<string, Redaction & { count: number }>();
+    for (const f of found) {
+      const key = `${f.kind}:${f.original.toLowerCase()}`;
+      const hit = seen.get(key);
+      if (hit) hit.count += 1;
+      else seen.set(key, { ...f, count: 1 });
+    }
+    return [...seen.values()];
+  }, [found]);
+
+  const add = () => {
+    const t = draft.trim();
+    if (t.length >= 2 && !extraTerms.includes(t)) onAddTerm(t);
+    setDraft("");
+  };
+
+  return (
+    <div className="mt-6 print:hidden">
+      <Window title="Before anything leaves your browser" tone="warn">
+        <div className="p-5">
+          <p className="text-[14px]/relaxed">
+            Your resume is stripped of personal details{" "}
+            <strong>on this device</strong>, before it is sent anywhere. The
+            analysis never needs your name or contact details, so they are
+            removed rather than trusted to anyone.
+          </p>
+
+          {unique.length > 0 ? (
+            <>
+              <p className="mt-4 text-[12px] uppercase tracking-wider text-[var(--muted)]">
+                Removing {unique.length}{" "}
+                {unique.length === 1 ? "item" : "items"}
+              </p>
+              <ul className="mt-2 flex flex-wrap gap-2">
+                {unique.map((f, i) => (
+                  <li
+                    key={i}
+                    className="flex items-center gap-2 border border-[var(--ink)] bg-white px-2.5 py-1 text-[12px]"
+                  >
+                    <span className="text-[var(--muted)]">
+                      {REDACTION_LABEL[f.kind]}
+                    </span>
+                    <span className="font-bold line-through decoration-2">
+                      {f.original.length > 34
+                        ? `${f.original.slice(0, 34)}…`
+                        : f.original}
+                    </span>
+                    {f.count > 1 && (
+                      <span className="text-[var(--muted)]">×{f.count}</span>
+                    )}
+                    {f.kind === "custom" && (
+                      <button
+                        onClick={() => onRemoveTerm(f.original)}
+                        className="text-[var(--muted)] hover:text-[var(--bad)]"
+                        aria-label={`Stop removing ${f.original}`}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="mt-4 text-[13px]/relaxed text-[var(--muted)]">
+              Nothing detected yet. Patterns catch emails, phone numbers,
+              profile links, locations and the name in your header.
+            </p>
+          )}
+
+          <div className="mt-5 border-t border-dashed border-[var(--muted)] pt-4">
+            <label className="text-[13px]/relaxed">
+              Missed something? A name further down, a referee, a client you
+              can&apos;t share — add it and it&apos;ll be removed everywhere.
+            </label>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), add())}
+                placeholder="e.g. a surname, a company"
+                className="sunken min-w-0 flex-1 px-3 py-2 text-[13px] outline-none placeholder:text-[var(--muted)]"
+              />
+              <button
+                onClick={add}
+                className="raised px-4 py-2 text-[12px] font-bold uppercase tracking-wider"
+              >
+                Remove it too
+              </button>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setShowPreview((s) => !s)}
+            className="mt-4 text-[12px] underline underline-offset-2"
+          >
+            {showPreview ? "Hide" : "Show"} exactly what gets sent
+          </button>
+          {showPreview && (
+            <pre className="sunken mt-2 max-h-72 overflow-auto p-3 text-[12px]/relaxed whitespace-pre-wrap">
+              {preview}
+            </pre>
+          )}
+
+          <p className="mt-4 text-[12px]/relaxed text-[var(--muted)]">
+            What remains — your roles, dates and achievements — is sent to
+            TypeSafe and OpenAI to be analysed. Nothing is stored on our side,
+            and no account is required. Automatic detection is good, not
+            perfect; the preview above is the final word.
+          </p>
+        </div>
+      </Window>
+    </div>
+  );
+}
+
 function LoadingDialog() {
   const [step, setStep] = useState(0);
 
   useEffect(() => {
     const t = setInterval(
       () => setStep((s) => Math.min(PASSES.length - 1, s + 1)),
-      2600,
+      2400,
     );
     return () => clearInterval(t);
   }, []);
 
   return (
-    <div className="win mx-auto mt-6 max-w-md">
+    <div className="win mx-auto mt-6 max-w-lg print:hidden">
       <div className="win-title">
         <span>ResumeMirror 1.0</span>
         <span className="win-btn" />
       </div>
-      <div className="p-4">
-        <p className="text-[12px]">{PASSES[step]}…</p>
-        <div className="sunken mt-3 h-4 p-[2px]">
+      <div className="p-5">
+        <p className="text-[14px]">{PASSES[step]}…</p>
+        <div className="sunken mt-3 h-5 p-[3px]">
           <div
             className="ants h-full transition-all duration-700"
             style={{ width: `${((step + 1) / PASSES.length) * 100}%` }}
           />
         </div>
-        <p className="mt-2 text-[10px] uppercase tracking-wider text-[var(--muted)]">
-          Pass {Math.min(step + 1, 3)} of 3
+        <p className="mt-2 text-[11px] uppercase tracking-wider text-[var(--muted)]">
+          This takes about fifteen seconds
         </p>
       </div>
     </div>
   );
 }
 
-/** Blocky segmented meter — 20 cells, hard-filled, no smooth gradient. */
 function Meter({ value, color }: { value: number; color: string }) {
   const cells = 20;
   const exact = value * cells;
@@ -272,25 +448,25 @@ function Results({ report }: { report: Report }) {
     report.hints.find((h) => h.dimension_id === id);
 
   return (
-    <div className="mt-8 flex flex-col gap-5">
+    <div className="mt-8 flex flex-col gap-6">
       <Headline report={report} />
       <ProfileRead report={report} />
 
-      <Window title="Role wants / you show">
-        <div className="flex flex-col gap-3.5 p-4">
+      <Window title="What this job wants, against what you show">
+        <div className="flex flex-col gap-4 p-5">
           {report.dimensions.map((d) => (
-            <div key={d.id}>
-              <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
-                <span className="text-[12px] font-bold uppercase tracking-wide">
+            <div key={d.id} className="break-inside-avoid">
+              <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
+                <span className="text-[14px] font-bold uppercase tracking-wide">
                   {d.label}
                   {d.uncertain && (
-                    <span className="ml-2 font-normal normal-case text-[var(--muted)]">
-                      unclear read
+                    <span className="ml-2 text-[12px] font-normal normal-case text-[var(--muted)]">
+                      couldn&apos;t read this clearly
                     </span>
                   )}
                 </span>
-                <span className="text-[11px] tabular-nums text-[var(--muted)]">
-                  wants {pct(d.importance)} · shows {pct(d.demonstrated)}
+                <span className="text-[12px] tabular-nums text-[var(--muted)]">
+                  this job: {pct(d.importance)} · you: {pct(d.demonstrated)}
                 </span>
               </div>
               <Meter
@@ -305,79 +481,40 @@ function Results({ report }: { report: Report }) {
                         : "var(--good)"
                 }
               />
-              <p className="mt-1 text-[11px]/relaxed text-[var(--muted)]">
-                Reads as: {d.currentLevel.toLowerCase()}
+              <p className="mt-1.5 text-[12px]/relaxed text-[var(--muted)]">
+                Right now yours reads as: {d.currentLevel.toLowerCase()}
               </p>
             </div>
           ))}
 
           {report.unreadable.length > 0 && (
-            <p className="mt-1 border border-dashed border-[var(--muted)] p-2.5 text-[11px]/relaxed text-[var(--muted)]">
-              {report.unreadable.map((d) => d.label).join(", ")} scored below the
-              confidence bar, so {report.unreadable.length === 1 ? "it is" : "they are"}{" "}
-              left out of the advice below. Usually that means your resume is
-              ambiguous on the point — itself worth fixing.
+            <p className="mt-1 border border-dashed border-[var(--muted)] p-3 text-[12px]/relaxed text-[var(--muted)]">
+              We couldn&apos;t get a clear read on{" "}
+              {report.unreadable.map((d) => d.label.toLowerCase()).join(" or ")},
+              so {report.unreadable.length === 1 ? "it is" : "they are"} left out
+              of the advice below. That usually means your resume is genuinely
+              ambiguous on the point — which is worth fixing on its own.
             </p>
           )}
         </div>
       </Window>
 
       {report.gaps.length > 0 && (
-        <Window title="Where the distance costs you most" tone="accent">
-          <div className="p-4">
-            <p className="mb-3.5 text-[11px]/relaxed text-[var(--muted)]">
-              Ranked by how much the role wants it × how little you show — not
-              simply by your lowest scores.
+        <Window title="The lines to change, most costly first" tone="accent">
+          <div className="p-5">
+            <p className="mb-4 text-[13px]/relaxed text-[var(--muted)]">
+              Ranked by how badly this job wants it against how little you show
+              — not simply by your lowest scores.
             </p>
             {report.hintsError && (
-              <p className="mb-3.5 border border-[var(--ink)] bg-[var(--accent)] p-2.5 text-[11px]/relaxed">
+              <p className="mb-4 border border-[var(--ink)] bg-[var(--accent)] p-3 text-[12px]/relaxed">
                 {report.hintsError}
               </p>
             )}
-            <div className="flex flex-col gap-4">
-              {report.gaps.map((gap) => {
-                const hint = hintFor(gap.id);
-                return (
-                  <article
-                    key={gap.id}
-                    className="border border-[var(--ink)] p-3.5"
-                  >
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <h3 className="text-[13px] font-bold uppercase tracking-wide">
-                        {gap.label}
-                      </h3>
-                      {hint?.evidence_missing && (
-                        <span className="border border-[var(--ink)] bg-[var(--accent)] px-2 py-0.5 text-[10px] uppercase tracking-wider">
-                          Not in your resume
-                        </span>
-                      )}
-                    </div>
-
-                    {hint && (
-                      <p className="mt-2 text-[12px]/relaxed">{hint.diagnosis}</p>
-                    )}
-
-                    {gap.nextLevel && (
-                      <p className="mt-2.5 text-[11px]/relaxed text-[var(--muted)]">
-                        Next level up: {gap.nextLevel.toLowerCase()}
-                      </p>
-                    )}
-
-                    {hint && hint.suggestions.length > 0 && (
-                      <ul className="mt-3 flex flex-col gap-2">
-                        {hint.suggestions.map((s, i) => (
-                          <li
-                            key={i}
-                            className="border-l-4 border-[var(--brand-blue-bright)] bg-black/[0.04] px-3 py-2 text-[12px]/relaxed"
-                          >
-                            {s}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </article>
-                );
-              })}
+            <div className="flex flex-col gap-5">
+              {report.gaps.map((gap) => (
+                <GapCard key={gap.id} gap={gap} hint={hintFor(gap.id)} />
+              ))}
             </div>
           </div>
         </Window>
@@ -385,33 +522,110 @@ function Results({ report }: { report: Report }) {
 
       {report.strengths.length > 0 && (
         <Window title="Lead with these">
-          <ul className="flex flex-wrap gap-2 p-4">
-            {report.strengths.map((s) => (
-              <li
-                key={s.id}
-                className="border border-[var(--ink)] bg-[var(--accent)] px-3 py-1.5 text-[12px] font-bold uppercase tracking-wide"
-              >
-                {s.label}
-                <span className="ml-2 font-normal tabular-nums">
-                  {pct(s.demonstrated)}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="p-5">
+            <p className="mb-3 text-[13px]/relaxed text-[var(--muted)]">
+              Strong evidence on things this job actually asks for. Get them
+              above the fold.
+            </p>
+            <ul className="flex flex-wrap gap-2">
+              {report.strengths.map((s) => (
+                <li
+                  key={s.id}
+                  className="border border-[var(--ink)] bg-[var(--accent)] px-3 py-1.5 text-[13px] font-bold uppercase tracking-wide"
+                >
+                  {s.label}
+                  <span className="ml-2 font-normal tabular-nums">
+                    {pct(s.demonstrated)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </Window>
       )}
 
       <HowItReads report={report} />
 
       <Window title="Run info">
-        <p className="p-3 text-[11px]/relaxed text-[var(--muted)]">
-          {report.model} · {report.dimensions.length} dimensions drawn from the
-          ad · 3 passes · {report.usage.inputTokens.toLocaleString()} input
-          tokens. Typed judgment guarantees the shape of these numbers, not that
-          they are right about you.
+        <p className="p-4 text-[12px]/relaxed text-[var(--muted)]">
+          {report.model} · {report.dimensions.length} things this ad asks for ·
+          4 passes · {report.usage.inputTokens.toLocaleString()} input tokens.
+          These numbers are one reader&apos;s judgment, carefully made — not a
+          verdict on you.
         </p>
       </Window>
     </div>
+  );
+}
+
+/** One gap. Either a line to rewrite, or an honest "this isn't here". */
+function GapCard({ gap, hint }: { gap: Report["gaps"][number]; hint?: RewriteHint }) {
+  const missing = hint?.evidence_missing ?? !gap.anchor;
+
+  return (
+    <article className="break-inside-avoid border border-[var(--ink)] p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-[15px] font-bold uppercase tracking-wide">
+          {gap.label}
+        </h3>
+        {missing && (
+          <span className="border border-[var(--ink)] bg-[var(--accent)] px-2 py-0.5 text-[11px] uppercase tracking-wider">
+            Not in your resume yet
+          </span>
+        )}
+      </div>
+
+      {hint && <p className="mt-2.5 text-[14px]/relaxed">{hint.diagnosis}</p>}
+
+      {!missing && hint?.current_line && hint.replacement && (
+        <div className="mt-4 flex flex-col gap-3">
+          <div>
+            <p className="mb-1.5 text-[11px] uppercase tracking-widest text-[var(--muted)]">
+              {!gap.anchor
+                ? "Your line"
+                : gap.anchor.uncertain
+                  ? `Probably line ${gap.anchor.line} — worth checking this is the right one`
+                  : `Line ${gap.anchor.line} of your resume`}
+            </p>
+            <p className="border-l-4 border-[var(--muted)] bg-black/[0.04] px-3.5 py-2.5 text-[13px]/relaxed line-through decoration-[var(--bad)]/60">
+              {hint.current_line}
+            </p>
+          </div>
+          <div>
+            <p className="mb-1.5 text-[11px] uppercase tracking-widest text-[var(--muted)]">
+              Change it to
+            </p>
+            <p className="border-l-4 border-[var(--good)] bg-[var(--good)]/[0.08] px-3.5 py-2.5 text-[13px]/relaxed font-medium">
+              {hint.replacement}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {missing && hint && hint.how_to_earn_it.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-2 text-[11px] uppercase tracking-widest text-[var(--muted)]">
+            How to genuinely earn this
+          </p>
+          <ul className="flex flex-col gap-2">
+            {hint.how_to_earn_it.map((s, i) => (
+              <li
+                key={i}
+                className="border-l-4 border-[var(--brand-blue-bright)] bg-black/[0.04] px-3.5 py-2.5 text-[13px]/relaxed"
+              >
+                {s}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {hint?.why && (
+        <p className="mt-3 text-[12px]/relaxed text-[var(--muted)]">
+          Why: {hint.why}
+        </p>
+      )}
+    </article>
   );
 }
 
@@ -419,37 +633,34 @@ function Headline({ report }: { report: Report }) {
   const { seniority, experience } = report;
 
   const note = seniority.uncertain
-    ? `Seniority was hard to read on one side or the other. Treat this loosely.`
+    ? "Seniority was hard to read on one side or the other, so take this loosely."
     : seniority.delta === 0
-      ? `Your resume reads at the level the ad asks for.`
+      ? "You're pitching at the right level for this one."
       : seniority.delta < 0
-        ? `You are pitching above what the resume currently shows.`
-        : `You may be over-qualified, or aiming lower than you could.`;
+        ? "You're reaching above what the resume currently backs up. Not fatal, but the gaps below are what a screener will catch."
+        : "You're aiming below what your resume supports. Worth asking whether there's a bigger version of this role.";
 
   return (
-    <Window title="Weighted fit" tone="accent">
-      <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:gap-6">
+    <Window title="How you'd land" tone="accent">
+      <div className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:gap-8">
         <div className="shrink-0">
-          <div className="text-5xl font-bold tabular-nums leading-none">
+          <div className="text-6xl font-bold tabular-nums leading-none">
             {pct(report.fit)}
           </div>
-          <div className="mt-1.5 text-[10px] uppercase tracking-widest text-[var(--muted)]">
+          <div className="mt-2 text-[11px] uppercase tracking-widest text-[var(--muted)]">
             weighted fit
           </div>
         </div>
-        <div className="flex flex-col gap-2 text-[12px]/relaxed">
-          <div className="flex flex-wrap gap-x-5 gap-y-1">
-            <Stat label="Ad reads" value={SENIORITY_LABEL[seniority.required]} />
-            <Stat
-              label="You read"
-              value={SENIORITY_LABEL[seniority.demonstrated]}
-            />
+        <div className="flex flex-col gap-3 text-[14px]/relaxed">
+          <div className="flex flex-wrap gap-x-7 gap-y-2">
+            <Stat label="This job wants" value={SENIORITY_LABEL[seniority.required]} />
+            <Stat label="You read as" value={SENIORITY_LABEL[seniority.demonstrated]} />
             <Stat label="Experience" value={`~${Math.round(experience.years)} YRS`} />
           </div>
           <p>{note}</p>
-          <p className="text-[var(--muted)]">
-            Career shape: {PROGRESSION_LABEL[experience.progression]}
-            {experience.progressionUncertain && " (not clear-cut)"}.
+          <p className="text-[13px] text-[var(--muted)]">
+            Your history reads as {PROGRESSION_LABEL[experience.progression]}
+            {experience.progressionUncertain && ", though not clear-cut"}.
           </p>
         </div>
       </div>
@@ -460,10 +671,10 @@ function Headline({ report }: { report: Report }) {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <span className="flex flex-col">
-      <span className="text-[10px] uppercase tracking-widest text-[var(--muted)]">
+      <span className="text-[11px] uppercase tracking-widest text-[var(--muted)]">
         {label}
       </span>
-      <span className="text-[13px] font-bold">{value}</span>
+      <span className="text-[15px] font-bold">{value}</span>
     </span>
   );
 }
@@ -473,36 +684,38 @@ function ProfileRead({ report }: { report: Report }) {
   if (profile.matches && !profile.resumeAlternative) return null;
 
   return (
-    <Window title="Who you read as">
-      <div className="p-4">
+    <Window title="Who your resume says you are">
+      <div className="p-5">
         {profile.matches ? (
-          <p className="text-[12px]/relaxed">
-            You read as a {profileName(profile.resumeReads)}, which is what this
-            role is hiring — though the read was not clear-cut, and{" "}
-            {profileName(profile.resumeAlternative!)} was a close second.
+          <p className="text-[14px]/relaxed">
+            You come across as a {profileName(profile.resumeReads)}, which is
+            what this role is after — though it was a close call, and{" "}
+            {profileName(profile.resumeAlternative!)} nearly won. Make the first
+            third of your resume settle the question.
           </p>
         ) : (
           <>
-            <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] font-bold uppercase tracking-wide">
-              <span className="border border-[var(--ink)] bg-[var(--accent)] px-2.5 py-1">
-                Ad wants: {profileName(profile.roleWants)}
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px] font-bold uppercase tracking-wide">
+              <span className="border border-[var(--ink)] bg-[var(--accent)] px-3 py-1.5">
+                They want: {profileName(profile.roleWants)}
               </span>
               <span className="text-[var(--muted)]">≠</span>
-              <span className="border border-[var(--ink)] px-2.5 py-1">
-                You read: {profileName(profile.resumeReads)}
+              <span className="border border-[var(--ink)] px-3 py-1.5">
+                You read as: {profileName(profile.resumeReads)}
               </span>
             </div>
-            <p className="text-[12px]/relaxed">
-              That mismatch costs more than any single missing skill: a screener
-              decides what kind of person you are in the first ten seconds, and
-              everything after that is read through it.
+            <p className="text-[14px]/relaxed">
+              This is the one to fix first. A screener decides what kind of
+              person you are in about ten seconds, and everything after that
+              gets read through it — so a perfect skills match further down
+              often never gets reached.
               {profile.uncertain &&
-                " Both reads carried some doubt, so weigh this alongside the detail below."}
+                " Both reads carried some doubt, so weigh it alongside the detail below."}
             </p>
           </>
         )}
-        <p className="mt-3 text-[11px]/relaxed text-[var(--muted)]">
-          {TALENT_PROFILES[profile.roleWants]}
+        <p className="mt-3 text-[12px]/relaxed text-[var(--muted)]">
+          What they&apos;re after: {TALENT_PROFILES[profile.roleWants]}
         </p>
       </div>
     </Window>
@@ -515,35 +728,35 @@ function HowItReads({ report }: { report: Report }) {
   const notes: { on: boolean; text: string }[] = [
     {
       on: s.hardRequirementConflict > 0.5,
-      text: "The ad states a hard requirement — location, work rights, a licence or credential — that your resume does not appear to meet. Worth checking before you spend time on the application.",
+      text: "This ad states a hard requirement — a location, work rights, a licence or a credential — that your resume doesn't appear to meet. Check that before you spend an evening on the application.",
     },
     {
       on: s.buriesTheLede > 0.5,
-      text: "Your most relevant experience sits too far down. A screener reads the top third; move it up.",
+      text: "Your most relevant experience is too far down. A screener reads the top third and decides; move your best-matching role or bullets above that line.",
     },
     {
       on: s.quantifiedOutcomes < 0.5,
-      text: "Your claims are mostly unquantified. Numbers are the cheapest credibility you can add.",
+      text: "Almost nothing you claim has a number attached. Numbers are the cheapest credibility there is — how many, how much, how fast, how many people.",
     },
     {
       on: s.tailoredToAd < 0.5,
-      text: "This reads as a generic resume rather than one aimed at this ad.",
+      text: "This reads like a resume you send to everyone. Even reordering your bullets so the ones matching this ad come first would change how it lands.",
     },
     {
       on: s.machineReadable < 0.5,
-      text: "The layout may not survive an automated parser — columns, tables, or graphics where plain headings would be safer.",
+      text: "The layout may not survive the software that reads it first — columns, tables and text inside graphics often get dropped. Plain headings and one role per block are safer.",
     },
     {
       on: s.keywordStuffing > 0.5,
-      text: "Your skills list names things the experience section never demonstrates. Screeners notice, and it weakens the skills you can actually back.",
+      text: "Your skills list names things that never show up in your actual experience. Screeners notice, and it quietly undermines the skills you can genuinely back.",
     },
     {
       on: s.experienceIsStale > 0.5,
-      text: "Your strongest work is in older roles. Recent experience is what gets read first.",
+      text: "Your best work is in your older roles. Recent experience is what gets read first, so if newer roles involved similar work, say so more fully.",
     },
     {
       on: s.unexplainedGaps > 0.5,
-      text: "There are gaps or turns in the history a reader would want explained.",
+      text: "There's a gap or a turn in your history that a reader will pause on. A short line of explanation costs you nothing and stops them guessing.",
     },
   ];
 
@@ -552,16 +765,62 @@ function HowItReads({ report }: { report: Report }) {
 
   return (
     <Window title="How the document itself reads">
-      <ul className="flex flex-col gap-2 p-4">
-        {active.map((n, i) => (
-          <li key={i} className="flex gap-2.5 text-[12px]/relaxed">
-            <span className="mt-[0.15rem] shrink-0 font-bold text-[var(--brand-blue-bright)]">
-              ▸
-            </span>
-            <span>{n.text}</span>
-          </li>
-        ))}
-      </ul>
+      <div className="p-5">
+        <p className="mb-3 text-[13px]/relaxed text-[var(--muted)]">
+          Separate from what you&apos;ve done — this is about the resume as an
+          object someone has to read.
+        </p>
+        <ul className="flex flex-col gap-2.5">
+          {active.map((n, i) => (
+            <li key={i} className="flex gap-3 text-[14px]/relaxed">
+              <span className="mt-[0.15rem] shrink-0 font-bold text-[var(--brand-blue-bright)]">
+                ▸
+              </span>
+              <span>{n.text}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
     </Window>
+  );
+}
+
+function Footer() {
+  return (
+    <footer className="mt-10 break-inside-avoid">
+      <div className="win">
+        <div className="flex flex-col items-start gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <a
+            href="https://feliperego.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0"
+          >
+            <Image
+              src="/felipe-rego-logo.png"
+              alt="Felipe Rego"
+              width={783}
+              height={201}
+              className="h-9 w-auto"
+              priority={false}
+            />
+          </a>
+          <p className="text-[12px]/relaxed text-[var(--muted)]">
+            Built by{" "}
+            <a
+              href="https://feliperego.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-bold text-[var(--brand-blue-bright)] underline underline-offset-2"
+            >
+              feliperego.com
+            </a>{" "}
+            — data, storytelling and AI consulting. Judgments by TypeSafe&apos;s
+            Jev; wording by OpenAI. Your resume is redacted in your browser and
+            never stored.
+          </p>
+        </div>
+      </div>
+    </footer>
   );
 }

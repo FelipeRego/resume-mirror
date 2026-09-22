@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "verify": "tsx scripts/verify.ts"
+    "verify": "tsx scripts/verify-redact.ts && tsx scripts/verify.ts"
   },
   "dependencies": {
     "@typesafe-ai/sdk": "^0.6.0",

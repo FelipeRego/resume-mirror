@@ -48,6 +48,11 @@ const stubFetch = async (_url: string, init?: RequestInit): Promise<Response> =>
 
   for (const [id, q] of Object.entries(payload.questions)) {
     if (q.type === "noul") {
+      if (id.startsWith("has__")) {
+        // machine_learning-style absence: no line to anchor to.
+        answers[id] = { type: "noul", noul: id === "has__people_leadership" ? 0.1 : 0.9 };
+        continue;
+      }
       const dim = id.startsWith("req__") ? id.slice(5) : null;
       answers[id] = { type: "noul", noul: dim ? (WANTS[dim] ?? 0.05) : 0.3 };
     } else if (q.type === "score") {
@@ -63,6 +68,13 @@ const stubFetch = async (_url: string, init?: RequestInit): Promise<Response> =>
           probabilities: {},
         };
       }
+    } else if (id.startsWith("where__")) {
+      answers[id] = {
+        type: "choice",
+        choice: "L3",
+        confidence: 0.8,
+        probabilities: { L3: 0.8, L1: 0.2 },
+      };
     } else {
       // Choice. The role reads senior/data_analyst; the resume reads mid/data_engineer.
       const pick =
@@ -103,19 +115,32 @@ const check = (name: string, fn: () => void) => {
 async function main() {
   process.env.TYPESAFE_API_KEY ||= "test-key-not-used";
 
-  const result = await screen("a resume".repeat(30), "a job ad".repeat(30), {
+  const RESUME = [
+    "ALEX TAYLOR",
+    "Data analyst with eight years across retail and finance.",
+    "- Built the weekly trading pack used by the exec team",
+    "- Ran cohort analysis that changed the retention budget",
+  ].join("\n");
+
+  const result = await screen(RESUME, "a job ad".repeat(30), {
     fetch: stubFetch,
   });
 
   // ---- state decomposition (build guide, step 2) -------------------------
 
-  check("sends three passes", () => {
-    assert.equal(sent.length, 3);
+  check("sends four passes", () => {
+    assert.equal(sent.length, 4);
   });
 
   const rolePass = sent.find((p) => !("resume" in p.state))!;
   const candidatePass = sent.find(
-    (p) => "resume" in p.state && !("job_ad" in p.state),
+    (p) =>
+      "resume" in p.state &&
+      !("job_ad" in p.state) &&
+      Object.keys(p.questions).some((k) => k.startsWith("dim__")),
+  )!;
+  const anchorPass = sent.find((p) =>
+    Object.keys(p.questions).some((k) => k.startsWith("where__")),
   )!;
   const fitPass = sent.find((p) => "resume" in p.state && "job_ad" in p.state)!;
 
@@ -273,8 +298,40 @@ async function main() {
     assert.equal(result.signals.buriesTheLede, 0.3);
   });
 
-  check("usage sums across all three passes", () => {
-    assert.equal(result.usage.inputTokens, 300);
+  check("usage sums across all four passes", () => {
+    assert.equal(result.usage.inputTokens, 400);
+  });
+
+  // ---- line anchoring (pass 4) -------------------------------------------
+
+  check("the anchor pass sees only the resume, with lines tagged", () => {
+    assert.deepEqual(Object.keys(anchorPass.state), ["resume"]);
+    assert.match(String(anchorPass.state.resume), /^L1\| ALEX TAYLOR/);
+  });
+
+  check("every gap gets both a where and a has question", () => {
+    const wheres = Object.keys(anchorPass.questions).filter((k) => k.startsWith("where__"));
+    const hases = Object.keys(anchorPass.questions).filter((k) => k.startsWith("has__"));
+    assert.equal(wheres.length, hases.length);
+    assert.ok(wheres.length > 0);
+  });
+
+  check("line ids offered as options are the original line numbers", () => {
+    const q = Object.entries(anchorPass.questions).find(([k]) => k.startsWith("where__"))![1];
+    assert.deepEqual(Object.keys(q.criteria as object), ["L1", "L2", "L3", "L4"]);
+  });
+
+  check("a gap with a matching line gets anchored to it", () => {
+    const sql = result.gaps.find((g) => g.id === "sql_querying")!;
+    assert.equal(sql.anchor?.line, 3);
+    assert.match(sql.anchor!.text, /weekly trading pack/);
+  });
+
+  check("a gap the resume cannot support is left unanchored", () => {
+    // has__people_leadership came back 0.1 — nothing to point at, so pointing
+    // anywhere would be worse than pointing nowhere.
+    const lead = result.gaps.find((g) => g.id === "people_leadership");
+    assert.equal(lead?.anchor, null);
   });
 
   for (const c of checks) console.log(`  ok  ${c}`);

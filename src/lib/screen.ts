@@ -5,6 +5,7 @@ import {
   score,
   type Fetch,
   type Questions,
+  type Usage,
 } from "@typesafe-ai/sdk";
 
 import {
@@ -21,6 +22,7 @@ import {
   type SeniorityLevel,
   type TalentProfile,
 } from "./dimensions";
+import { numberLines } from "./redact";
 
 /**
  * Built to the shape in the TypeSafe build guide's "three software
@@ -63,6 +65,14 @@ const MAX_SCORED_DIMENSIONS = 10;
 const MIN_SCORE_CONFIDENCE = 0.55;
 /** Below this, we report a choice as ambiguous rather than as the answer. */
 const MIN_CHOICE_CONFIDENCE = 0.5;
+/**
+ * Anchor confidence gets its own, much lower bar. A Choice over sixty lines
+ * spreads probability thin, so a correct pick can still sit around 0.3 — the
+ * number means something different here than it does over six options. Below
+ * this we still show the line, but as a suggestion to check rather than an
+ * instruction to follow.
+ */
+const MIN_ANCHOR_CONFIDENCE = 0.35;
 
 export type DimensionResult = {
   id: string;
@@ -83,6 +93,8 @@ export type DimensionResult = {
   currentLevel: string;
   /** The next level up — what "better" concretely looks like. */
   nextLevel: string | null;
+  /** The specific line to change. Only populated for gaps. */
+  anchor: Anchor | null;
 };
 
 export type ScreenResult = {
@@ -399,6 +411,94 @@ async function readFit(resume: string, jobAd: string, options: ScreenOptions) {
   });
 }
 
+// --- pass 4: where in the document -----------------------------------------
+// State: the resume with every line tagged by its ORIGINAL line number, so an
+// answer of "L14" is line 14 of the document on the candidate's screen.
+//
+// This is the "select, don't generate" pattern: code finds the candidates (the
+// lines), Jev selects among them, and only then does a generative model write
+// replacement wording for the one line that was chosen.
+
+/** Choice accepts at most 255 options, so that is the line ceiling per request. */
+const MAX_ANCHOR_LINES = 255;
+
+export type Anchor = {
+  /** Line number in the original document. */
+  line: number;
+  text: string;
+  /** Jev's confidence that this is the right line. */
+  confidence: number;
+  /** True when the pick was thin — shown as "probably this one". */
+  uncertain: boolean;
+};
+
+async function anchorGaps(
+  resume: string,
+  gaps: DimensionResult[],
+  options: ScreenOptions,
+): Promise<{ anchors: Map<string, Anchor>; usage: Usage }> {
+  const anchors = new Map<string, Anchor>();
+  const none = { anchors, usage: { input_tokens: 0, output_tokens: 0 } };
+  if (gaps.length === 0) return none;
+
+  const lines = numberLines(resume).slice(0, MAX_ANCHOR_LINES);
+  if (lines.length === 0) return none;
+
+  const byId = new Map(lines.map((l) => [`L${l.n}`, l]));
+  const ids = Object.fromEntries(lines.map((l) => [`L${l.n}`, null]));
+  const tagged = lines.map((l) => `L${l.n}| ${l.text}`).join("\n");
+
+  const questions: Questions = {};
+  for (const gap of gaps) {
+    // Which line, if any, is the one to change.
+    questions[`where__${gap.id}`] = choice(
+      {
+        question: `Which single line of \`resume\` is the best one to rewrite in order to show more ${gap.label.toLowerCase()}?`,
+        focus:
+          "Prefer a line that already describes relevant work but undersells it, over a line that would have to invent something.",
+      },
+      ids,
+    );
+
+    // Choice probabilities always sum to 1, so some line ranks first even when
+    // the resume has nothing to say on this dimension. Without this companion
+    // question we would confidently point at an irrelevant line.
+    questions[`has__${gap.id}`] = noul(
+      {
+        question: `Does \`resume\` contain any line that genuinely relates to ${gap.label.toLowerCase()}?`,
+      },
+      {
+        true: "At least one line describes work relevant to this, even if it undersells it",
+        false: "Nothing in the resume relates to this; rewording could only invent it",
+      },
+    );
+  }
+
+  const res = await client(options).systemOne({
+    state: { resume: tagged },
+    questions,
+  });
+
+  const answers = res.answers as Answers;
+
+  for (const gap of gaps) {
+    if (asNoul(answers, `has__${gap.id}`) < 0.5) continue;
+
+    const picked = asChoice(answers, `where__${gap.id}`, "");
+    const line = byId.get(picked.value);
+    if (!line) continue;
+
+    anchors.set(gap.id, {
+      line: line.n,
+      text: line.text,
+      confidence: picked.confidence,
+      uncertain: picked.confidence < MIN_ANCHOR_CONFIDENCE,
+    });
+  }
+
+  return { anchors, usage: res.usage };
+}
+
 // --- composition -----------------------------------------------------------
 
 export async function screen(
@@ -454,6 +554,7 @@ export async function screen(
       cost: importance * (1 - demonstrated),
       currentLevel: rubric.levels[levelIndex],
       nextLevel: levelIndex < MAX_SCORE ? rubric.levels[levelIndex + 1] : null,
+      anchor: null,
     };
   });
 
@@ -474,13 +575,19 @@ export async function screen(
   const progression = asChoice<CareerProgression>(cAnswers, "progression", "unclear");
   const years = asScore(cAnswers, "experience_years");
 
+  const gaps = [...confident]
+    .filter((d) => d.cost > 0.15)
+    .sort((a, b) => b.cost - a.cost)
+    .slice(0, 5);
+
+  // Pass 4 needs the gap list, so it cannot run alongside passes 2 and 3.
+  const anchored = await anchorGaps(resume, gaps, options);
+  for (const gap of gaps) gap.anchor = anchored.anchors.get(gap.id) ?? null;
+
   return {
     fit: fitScore,
     dimensions: [...dimensions].sort((a, b) => b.importance - a.importance),
-    gaps: [...confident]
-      .filter((d) => d.cost > 0.15)
-      .sort((a, b) => b.cost - a.cost)
-      .slice(0, 5),
+    gaps,
     strengths: [...confident]
       .filter((d) => d.demonstrated >= 0.6 && d.importance >= 0.5)
       .sort(
@@ -531,11 +638,13 @@ export async function screen(
       inputTokens:
         role.usage.input_tokens +
         candidate.usage.input_tokens +
-        fit.usage.input_tokens,
+        fit.usage.input_tokens +
+        anchored.usage.input_tokens,
       outputTokens:
         role.usage.output_tokens +
         candidate.usage.output_tokens +
-        fit.usage.output_tokens,
+        fit.usage.output_tokens +
+        anchored.usage.output_tokens,
     },
     model: candidate.model,
   };

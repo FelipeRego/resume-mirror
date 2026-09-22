@@ -13,6 +13,10 @@ flow, and the model appears only where the system needs programmable common
 sense. There is no `while` loop, and nothing asks a model to add up numbers.
 
 ```
+resume ──────▶ REDACTED IN THE BROWSER
+               name, email, phone, profile links, location
+               nothing below this line ever sees them
+                            │
 job ad ──────▶ PASS 1 · the role
                24 Nouls — "does this role require X?"
                the returned probability IS the weight
@@ -34,7 +38,11 @@ resume ──────▶ PASS 3 · the comparison        │
                      cost = want × (1 − show)
                      low-confidence reads quarantined
                             │
-             top gaps ──▶ GPT-5.4 ──▶ wording only
+               PASS 4 · which line
+               one Choice over every numbered line, per gap,
+               plus a Noul: is there anything here at all?
+                            │
+             top gaps ──▶ GPT-5.4 ──▶ wording for that one line
 ```
 
 **Why three passes.** Questions in one request all see the same state, so state
@@ -54,6 +62,19 @@ worth 20%".
 **Gaps rank by cost, not by low score.** A competency you score badly on barely
 matters if the ad doesn't want it. `want × (1 − show)` is what moves a gap up the
 list.
+
+**PII is removed, not promised about.** Redaction runs in the browser before
+anything is sent, so TypeSafe and OpenAI never receive contact details — an
+architectural guarantee rather than a policy one. No question in the pipeline
+needs a name or an email, so this costs nothing analytically. Regex cannot
+reliably find a human name, so the UI shows exactly what was caught and lets the
+candidate add anything it missed; they are the backstop, not the patterns.
+
+**The advice points at one line.** Pass 4 is the "select, don't generate"
+pattern: code numbers the lines, Jev picks which one to change, and only then
+does a generative model write a replacement for it. Its companion Noul matters
+more than it looks — Choice probabilities always sum to 1, so without it a gap
+the resume says nothing about would still get a confidently wrong line.
 
 **Uncertainty is routed, not ignored.** A score below `MIN_SCORE_CONFIDENCE`
 still counts toward fit — dropping it would quietly reshape the headline — but
@@ -115,8 +136,16 @@ judgment on a handful of real resumes before trusting these.
 npm run verify
 ```
 
-Stubs the HTTP transport and checks the parts we own rather than the model's
-judgment — 22 assertions covering state decomposition (the role pass never sees
+Two suites, 48 assertions, no API key and no tokens spent.
+
+`verify-redact.ts` covers both ways redaction fails: missing PII, and eating
+evidence. The second is the dangerous one — an early shape-based location rule
+silently ate "Java, Spring Boot" and "Data Structures, Algorithms", because
+"Capitalised, Capitalised" is the most common pattern in a resume. Those exact
+strings are now regression cases.
+
+`verify.ts` stubs the HTTP transport and checks the parts we own rather than the
+model's judgment — assertions covering state decomposition (the role pass never sees
 the resume, the candidate pass never sees the ad, only comparison questions get
 both), question construction (rubrics inside the API's 2–10 level limit,
 backticked state paths, today's date carried rather than assumed), the
