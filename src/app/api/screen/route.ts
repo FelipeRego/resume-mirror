@@ -66,7 +66,14 @@ export async function POST(request: Request) {
         "OPENAI_API_KEY is not set, so rewrite suggestions were skipped. Scores and gaps are unaffected.";
     } else {
       try {
-        const written = await rewriteHints(resume, jobAd, result.gaps, {
+        // Focus detailed AI drop-in rewrites on actual shortfalls (demonstrated < importance)
+        // sorted by impact cost, capping at top 6 to keep response times fast and responsive.
+        const shortfalls = result.gaps.filter(
+          (g) => g.demonstrated < g.importance,
+        );
+        const gapsToRewrite = (shortfalls.length > 0 ? shortfalls : result.gaps).slice(0, 6);
+
+        const written = await rewriteHints(resume, jobAd, gapsToRewrite, {
           roleWants: result.profile.roleWants,
           resumeReads: result.profile.resumeReads,
           matches: result.profile.matches,

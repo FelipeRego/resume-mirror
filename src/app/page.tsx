@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { DIMENSION_BY_ID, TALENT_PROFILES } from "@/lib/dimensions";
+import type { DiffItem, ValidationReport } from "@/lib/optimize";
 import { redact, type Redaction } from "@/lib/redact";
 import type { Positioning, RewriteHint } from "@/lib/rewrite";
 import type { ScreenResult } from "@/lib/screen";
@@ -12,6 +13,21 @@ type Report = ScreenResult & {
   hints: RewriteHint[];
   positioning: Positioning;
   hintsError: string | null;
+};
+
+type OptimizationData = {
+  revisedResume: string;
+  keyChanges: string[];
+  validation: ValidationReport;
+  diff: DiffItem[];
+  previousFit: number;
+  newFit: number;
+  fitDelta: number;
+  newScreenResult: ScreenResult | null;
+  newHints?: RewriteHint[];
+  newPositioning?: Positioning;
+  allGapsClosed?: boolean;
+  iteration: number;
 };
 
 type Action = {
@@ -175,6 +191,7 @@ const profileName = (p: string) => PROFILE_LABEL[p] ?? p.replace(/_/g, " ");
 export default function Home() {
   const [resume, setResume] = useState("");
   const [jobAd, setJobAd] = useState("");
+  const [redactResume, setRedactResume] = useState(true);
   const [extraTerms, setExtraTerms] = useState<string[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -191,12 +208,13 @@ export default function Home() {
     setError(null);
     setReport(null);
 
+    const resumeToSend = redactResume ? scrubbed.text : resume;
+
     try {
       const res = await fetch("/api/screen", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // The redacted text, never the original.
-        body: JSON.stringify({ resume: scrubbed.text, jobAd }),
+        body: JSON.stringify({ resume: resumeToSend, jobAd }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Something went wrong.");
@@ -233,6 +251,22 @@ export default function Home() {
             onChange={setResume}
             placeholder="Paste your resume here…"
           />
+          <div className="border-t border-[var(--ink)] bg-[var(--paper)] px-3 py-2.5">
+            <label className="flex cursor-pointer select-none items-center gap-2.5 text-[13px] font-bold">
+              <input
+                type="checkbox"
+                checked={redactResume}
+                onChange={(e) => setRedactResume(e.target.checked)}
+                className="h-4 w-4 cursor-pointer accent-[var(--brand-yellow)]"
+              />
+              <span>Redact personal details (name, email, phone, location)</span>
+            </label>
+            <p className="mt-1 pl-6 text-[12px] text-[var(--muted)]">
+              {redactResume
+                ? "Scrubbed locally in your browser before screening."
+                : "Off — your full resume will be analyzed without removing names or contact info."}
+            </p>
+          </div>
         </Window>
         <Window title="The job ad.txt">
           <Paste
@@ -243,14 +277,35 @@ export default function Home() {
         </Window>
       </div>
 
-      {resume.length > 0 && (
+      {resume.length > 0 && redactResume && (
         <PrivacyCheck
           found={scrubbed.found}
           extraTerms={extraTerms}
           onAddTerm={(t) => setExtraTerms((xs) => [...xs, t])}
           onRemoveTerm={(t) => setExtraTerms((xs) => xs.filter((x) => x !== t))}
           preview={scrubbed.text}
+          onDisableRedaction={() => setRedactResume(false)}
         />
+      )}
+
+      {resume.length > 0 && !redactResume && (
+        <div className="win mt-6 print:hidden">
+          <div className="win-title" style={{ background: "var(--paper)" }}>
+            <span>Privacy Option</span>
+            <span className="win-btn" />
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <p className="text-[13px]/relaxed text-[var(--muted)]">
+              <strong>Redaction is turned off.</strong> Your resume will be sent with names, contact details, and locations as pasted.
+            </p>
+            <button
+              onClick={() => setRedactResume(true)}
+              className="raised cursor-pointer px-3 py-1.5 text-[12px] font-bold uppercase tracking-wider"
+            >
+              Turn on redaction
+            </button>
+          </div>
+        </div>
       )}
 
       <div className="mt-6 flex flex-wrap items-center gap-4 print:hidden">
@@ -288,7 +343,17 @@ export default function Home() {
         </div>
       )}
 
-      {report && <Results report={report} />}
+      {report && (
+        <Results
+          report={report}
+          resume={redactResume ? scrubbed.text : resume}
+          jobAd={jobAd}
+          onApplyResume={(newText) => {
+            setResume(newText);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        />
+      )}
 
       <Footer />
     </main>
@@ -364,12 +429,14 @@ function PrivacyCheck({
   onAddTerm,
   onRemoveTerm,
   preview,
+  onDisableRedaction,
 }: {
   found: Redaction[];
   extraTerms: string[];
   onAddTerm: (t: string) => void;
   onRemoveTerm: (t: string) => void;
   preview: string;
+  onDisableRedaction: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const [showPreview, setShowPreview] = useState(false);
@@ -396,12 +463,20 @@ function PrivacyCheck({
     <div className="mt-6 print:hidden">
       <Window title="Before anything leaves your browser" tone="warn">
         <div className="p-5">
-          <p className="text-[14px]/relaxed">
-            Your resume is stripped of personal details{" "}
-            <strong>on this device</strong>, before it is sent anywhere. The
-            analysis never needs your name or contact details, so they are
-            removed rather than trusted to anyone.
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <p className="max-w-2xl text-[14px]/relaxed">
+              Your resume is stripped of personal details{" "}
+              <strong>on this device</strong>, before it is sent anywhere. The
+              analysis never needs your name or contact details, so they are
+              removed rather than trusted to anyone.
+            </p>
+            <button
+              onClick={onDisableRedaction}
+              className="raised cursor-pointer px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--muted)] hover:text-[var(--ink)]"
+            >
+              Don&apos;t redact
+            </button>
+          </div>
 
           {unique.length > 0 ? (
             <>
@@ -494,13 +569,27 @@ function PrivacyCheck({
 
 function LoadingDialog() {
   const [step, setStep] = useState(0);
+  const [progress, setProgress] = useState(12);
 
   useEffect(() => {
-    const t = setInterval(
-      () => setStep((s) => Math.min(PASSES.length - 1, s + 1)),
-      2400,
-    );
-    return () => clearInterval(t);
+    // Step through the 5 passes over the screening cycle
+    const stepTimer = setInterval(() => {
+      setStep((s) => Math.min(PASSES.length - 1, s + 1));
+    }, 3200);
+
+    // Smooth continuous progress bar that approaches 95% without freezing
+    const progressTimer = setInterval(() => {
+      setProgress((p) => {
+        if (p >= 92) return p;
+        const gap = 94 - p;
+        return p + Math.max(1, Math.round(gap * 0.1));
+      });
+    }, 450);
+
+    return () => {
+      clearInterval(stepTimer);
+      clearInterval(progressTimer);
+    };
   }, []);
 
   return (
@@ -510,15 +599,15 @@ function LoadingDialog() {
         <span className="win-btn" />
       </div>
       <div className="p-5">
-        <p className="text-[14px]">{PASSES[step]}…</p>
+        <p className="text-[14px] font-medium">{PASSES[step]}…</p>
         <div className="sunken mt-3 h-5 p-[3px]">
           <div
-            className="ants h-full transition-all duration-700"
-            style={{ width: `${((step + 1) / PASSES.length) * 100}%` }}
+            className="ants h-full transition-all duration-300 ease-out"
+            style={{ width: `${progress}%` }}
           />
         </div>
         <p className="mt-2 text-[11px] uppercase tracking-wider text-[var(--muted)]">
-          This takes about fifteen seconds
+          Four-pass evaluation across 42 competencies with line anchoring
         </p>
       </div>
     </div>
@@ -567,7 +656,17 @@ function Meter({
   );
 }
 
-function Results({ report }: { report: Report }) {
+function Results({
+  report,
+  resume,
+  jobAd,
+  onApplyResume,
+}: {
+  report: Report;
+  resume: string;
+  jobAd: string;
+  onApplyResume: (newText: string) => void;
+}) {
   const hintFor = (id: string) =>
     report.hints.find((h) => h.dimension_id === id);
 
@@ -677,6 +776,13 @@ function Results({ report }: { report: Report }) {
           </p>
         </div>
       </Window>
+
+      <OptimizationLoop
+        report={report}
+        resume={resume}
+        jobAd={jobAd}
+        onApplyResume={onApplyResume}
+      />
     </div>
   );
 }
@@ -1251,6 +1357,495 @@ function HowItReads({ report }: { report: Report }) {
   );
 }
 
+function renderHighlightedText(text: string) {
+  const parts = text.split(/(\[[^\]]+\])/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("[") && part.endsWith("]")) {
+      return (
+        <mark
+          key={i}
+          className="border border-[var(--ink)] bg-[var(--accent)] px-1 py-0.5 font-bold text-[var(--ink)]"
+          title="Bracketed customization placeholder — customize with your genuine numbers/project"
+        >
+          {part}
+        </mark>
+      );
+    }
+    return part;
+  });
+}
+
+function OptimizationLoop({
+  report,
+  resume,
+  jobAd,
+  onApplyResume,
+}: {
+  report: Report;
+  resume: string;
+  jobAd: string;
+  onApplyResume: (newText: string) => void;
+}) {
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [stepText, setStepText] = useState<string>(
+    "Synthesizing tailored resume with OpenAI...",
+  );
+  const [optData, setOptData] = useState<OptimizationData | null>(null);
+  const [activeTab, setActiveTab] = useState<"diff" | "clean" | "scores">(
+    "diff",
+  );
+  const [copied, setCopied] = useState(false);
+
+  async function runOptimize(iteration = 1, currentBaseResume = resume) {
+    setRunning(true);
+    setError(null);
+    setStepText("Synthesizing tailored resume with OpenAI...");
+
+    const t1 = setTimeout(() => {
+      setStepText(
+        "Validating document structure & anti-hallucination guardrails...",
+      );
+    }, 2500);
+    const t2 = setTimeout(() => {
+      setStepText(
+        "Re-screening revised resume through TypeSafe Jev to measure improvement...",
+      );
+    }, 5500);
+
+    try {
+      const res = await fetch("/api/optimize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          originalResume: resume,
+          currentResume: currentBaseResume,
+          jobAd,
+          dimensions: optData?.newScreenResult
+            ? optData.newScreenResult.dimensions
+            : report.dimensions,
+          gaps: optData?.newScreenResult
+            ? optData.newScreenResult.gaps
+            : report.gaps,
+          strengths: optData?.newScreenResult
+            ? optData.newScreenResult.strengths
+            : report.strengths,
+          hints:
+            optData?.newHints && optData.newHints.length > 0
+              ? optData.newHints
+              : report.hints,
+          positioning:
+            optData?.newPositioning !== undefined
+              ? optData.newPositioning
+              : report.positioning,
+          previousFit: optData ? optData.newFit : report.fit,
+          iteration,
+        }),
+      });
+
+      clearTimeout(t1);
+      clearTimeout(t2);
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Optimization failed.");
+
+      setOptData(data as OptimizationData);
+      setActiveTab("diff");
+    } catch (e) {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      setError(e instanceof Error ? e.message : "Optimization failed.");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  function downloadText(text: string, filename: string) {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  function copyCleanResume(text: string) {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <Window
+      title={
+        optData
+          ? `Resume Mirror Loop — Version ${optData.iteration + 1}`
+          : "Resume Mirror Loop — Auto-Optimize & Re-Screen"
+      }
+      tone="accent"
+    >
+      <div className="p-5">
+        {!optData && !running && (
+          <div>
+            <p className="text-[14px]/relaxed">
+              We can automatically take the diagnostics, line rewrites, and gap
+              bridges from this screen, generate an upgraded version of your
+              resume, validate it, and re-screen it through TypeSafe Jev to test
+              if your fit score improves.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => runOptimize(1, resume)}
+                disabled={running}
+                className="raised flex cursor-pointer items-center gap-2 px-5 py-2.5 text-[13px] font-bold uppercase tracking-widest"
+              >
+                <span>⚡</span>
+                <span>Generate Optimized Resume (v2) & Test Score</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {running && (
+          <div className="flex flex-col items-center justify-center py-6 text-center">
+            <div className="mb-3 h-2 w-48 overflow-hidden bg-[var(--muted)]/30">
+              <div className="h-full w-full animate-pulse bg-[var(--brand-yellow)]" />
+            </div>
+            <p className="text-[14px] font-medium text-[var(--ink)]">
+              {stepText}
+            </p>
+            <p className="mt-1 text-[12px] text-[var(--muted)]">
+              This will only take a moment.
+            </p>
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-3 border-l-4 border-[var(--bad)] bg-[var(--bad)]/10 p-3 text-[13px] text-[var(--bad)]">
+            {error}
+          </div>
+        )}
+
+        {optData && !running && (
+          <div className="flex flex-col gap-5">
+            {/* Impact Banner */}
+            <div className="border border-[var(--ink)] bg-[var(--accent)]/30 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">
+                    Improvement Measured by Screener
+                  </p>
+                  <p className="mt-1 text-2xl font-bold tracking-tight">
+                    Fit Score: {pct(optData.previousFit)} →{" "}
+                    <span className="text-[var(--good)]">
+                      {pct(optData.newFit)}
+                    </span>
+                  </p>
+                </div>
+                <span className="border border-[var(--ink)] bg-[var(--good)] px-3 py-1.5 text-[13px] font-bold uppercase tracking-wider text-black">
+                  {optData.fitDelta >= 0
+                    ? `+${optData.fitDelta} pts`
+                    : `${optData.fitDelta} pts`}{" "}
+                  improvement
+                </span>
+              </div>
+
+              {optData.validation.injectedPlaceholders.length > 0 && (
+                <div className="mt-3.5 border-t border-dashed border-[var(--ink)]/30 pt-3">
+                  <p className="text-[12px]/relaxed font-medium">
+                    <span className="font-bold text-[var(--ink)]">
+                      ⚡ Customization Brackets Injected:
+                    </span>{" "}
+                    We added {optData.validation.injectedPlaceholders.length}{" "}
+                    high-impact drafted bullet(s) with bracketed placeholders
+                    like{" "}
+                    <code className="bg-[var(--brand-yellow)] px-1 text-[var(--ink)]">
+                      [X% improvement]
+                    </code>{" "}
+                    for you to customize with your genuine numbers and project
+                    details before submitting.
+                  </p>
+                </div>
+              )}
+
+              {optData.keyChanges.length > 0 && (
+                <div className="mt-3.5 border-t border-dashed border-[var(--ink)]/30 pt-3">
+                  <p className="mb-1 text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">
+                    Key Changes Applied:
+                  </p>
+                  <ul className="flex flex-col gap-1 text-[12px]/relaxed">
+                    {optData.keyChanges.map((change, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="font-bold text-[var(--good)]">✓</span>
+                        <span>{change}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            {/* Tab Controls */}
+            <div className="flex border-b border-[var(--ink)]">
+              <button
+                onClick={() => setActiveTab("diff")}
+                className={`cursor-pointer px-4 py-2 text-[12px] font-bold uppercase tracking-wider transition-colors ${
+                  activeTab === "diff"
+                    ? "-mb-[1px] border-t-2 border-r-2 border-l-2 border-[var(--ink)] bg-[var(--paper)] text-[var(--ink)]"
+                    : "text-[var(--muted)] hover:text-[var(--ink)]"
+                }`}
+              >
+                Visual Diff (
+                {optData.diff.filter((d) => d.type !== "same").length} changes)
+              </button>
+              <button
+                onClick={() => setActiveTab("clean")}
+                className={`cursor-pointer px-4 py-2 text-[12px] font-bold uppercase tracking-wider transition-colors ${
+                  activeTab === "clean"
+                    ? "-mb-[1px] border-t-2 border-r-2 border-l-2 border-[var(--ink)] bg-[var(--paper)] text-[var(--ink)]"
+                    : "text-[var(--muted)] hover:text-[var(--ink)]"
+                }`}
+              >
+                Clean Revised Resume
+              </button>
+              <button
+                onClick={() => setActiveTab("scores")}
+                className={`cursor-pointer px-4 py-2 text-[12px] font-bold uppercase tracking-wider transition-colors ${
+                  activeTab === "scores"
+                    ? "-mb-[1px] border-t-2 border-r-2 border-l-2 border-[var(--ink)] bg-[var(--paper)] text-[var(--ink)]"
+                    : "text-[var(--muted)] hover:text-[var(--ink)]"
+                }`}
+              >
+                Score Movement
+              </button>
+            </div>
+
+            {/* Tab 1: Diff View */}
+            {activeTab === "diff" && (
+              <div className="max-h-[500px] overflow-y-auto border border-[var(--ink)] bg-black/[0.02] p-4">
+                <div className="mb-2 flex items-center gap-4 border-b border-dashed border-[var(--muted)]/40 pb-2 text-[11px] uppercase tracking-wider text-[var(--muted)]">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 bg-[var(--good)]" /> Added /
+                    Rewritten
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 bg-[var(--bad)]" /> Replaced
+                    Original
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 bg-[var(--brand-yellow)]" />{" "}
+                    Custom Placeholder
+                  </span>
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  {optData.diff.map((item, idx) => {
+                    if (item.type === "same") {
+                      return (
+                        <div
+                          key={idx}
+                          className="px-2 py-0.5 font-mono text-[12px]/relaxed whitespace-pre-wrap text-[var(--muted)]"
+                        >
+                          {item.text || " "}
+                        </div>
+                      );
+                    }
+                    if (item.type === "remove") {
+                      return (
+                        <div
+                          key={idx}
+                          className="border-l-2 border-[var(--bad)] bg-[var(--bad)]/10 px-2 py-0.5 font-mono text-[12px]/relaxed whitespace-pre-wrap text-[var(--bad)] line-through"
+                        >
+                          <span className="mr-2 select-none font-bold text-[var(--bad)]">
+                            -
+                          </span>
+                          {item.text}
+                        </div>
+                      );
+                    }
+                    if (item.type === "add") {
+                      return (
+                        <div
+                          key={idx}
+                          className="border-l-2 border-[var(--good)] bg-[var(--good)]/15 px-2 py-0.5 font-mono text-[12px]/relaxed font-medium whitespace-pre-wrap text-[var(--ink)]"
+                        >
+                          <span className="mr-2 select-none font-bold text-[var(--good)]">
+                            +
+                          </span>
+                          {renderHighlightedText(item.text)}
+                        </div>
+                      );
+                    }
+                    if (item.type === "modify") {
+                      return (
+                        <div key={idx} className="flex flex-col gap-0.5">
+                          {item.originalText && (
+                            <div className="border-l-2 border-[var(--bad)] bg-[var(--bad)]/10 px-2 py-0.5 font-mono text-[12px]/relaxed whitespace-pre-wrap text-[var(--bad)] line-through">
+                              <span className="mr-2 select-none font-bold text-[var(--bad)]">
+                                -
+                              </span>
+                              {item.originalText}
+                            </div>
+                          )}
+                          <div className="border-l-2 border-[var(--good)] bg-[var(--good)]/15 px-2 py-0.5 font-mono text-[12px]/relaxed font-medium whitespace-pre-wrap text-[var(--ink)]">
+                            <span className="mr-2 select-none font-bold text-[var(--good)]">
+                              +
+                            </span>
+                            {renderHighlightedText(item.text)}
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Tab 2: Clean Resume */}
+            {activeTab === "clean" && (
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[12px] text-[var(--muted)]">
+                    {optData.revisedResume.split("\n").length} lines · ready to
+                    review or copy
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => copyCleanResume(optData.revisedResume)}
+                      className="raised cursor-pointer px-3 py-1.5 text-[12px] font-bold uppercase tracking-wider"
+                    >
+                      {copied ? "✓ Copied!" : "Copy Revised Resume"}
+                    </button>
+                    <button
+                      onClick={() =>
+                        downloadText(
+                          optData.revisedResume,
+                          `resume-optimized-v${optData.iteration + 1}.txt`,
+                        )
+                      }
+                      className="raised cursor-pointer px-3 py-1.5 text-[12px] font-bold uppercase tracking-wider"
+                    >
+                      Download (.txt)
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  readOnly
+                  value={optData.revisedResume}
+                  rows={18}
+                  className="sunken w-full resize-y p-3 font-mono text-[12px]/relaxed text-[var(--ink)]"
+                />
+              </div>
+            )}
+
+            {/* Tab 3: Score Movement */}
+            {activeTab === "scores" && (
+              <div className="border border-[var(--ink)] p-4">
+                <p className="mb-4 text-[13px]/relaxed text-[var(--muted)]">
+                  Here is how each competency scored after incorporating the
+                  suggested enhancements:
+                </p>
+                <div className="flex flex-col gap-3.5">
+                  {(optData.newScreenResult?.dimensions ?? report.dimensions).map((newD) => {
+                    const baseD = report.dimensions.find(
+                      (d) => d.id === newD.id,
+                    );
+                    const baseScore = baseD?.demonstrated ?? 0;
+                    const delta = Math.round(
+                      (newD.demonstrated - baseScore) * 100,
+                    );
+                    const cleared = newD.demonstrated >= newD.importance;
+
+                    return (
+                      <div
+                        key={newD.id}
+                        className="border-b border-dashed border-[var(--muted)]/40 pb-3"
+                      >
+                        <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+                          <span className="text-[13px] font-bold uppercase">
+                            {newD.label}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            {delta > 0 && (
+                              <span className="text-[11px] font-bold text-[var(--good)]">
+                                +{delta} pts
+                              </span>
+                            )}
+                            {cleared && (
+                              <span className="border border-[var(--ink)] bg-[var(--good)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-black">
+                                ✓ Cleared
+                              </span>
+                            )}
+                            <span className="text-[12px] tabular-nums text-[var(--muted)]">
+                              was {pct(baseScore)} → now {pct(newD.demonstrated)}{" "}
+                              (wants {pct(newD.importance)})
+                            </span>
+                          </div>
+                        </div>
+                        <Meter
+                          value={newD.demonstrated}
+                          target={newD.importance}
+                          color={barColour(newD)}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Next Iteration or Apply Action Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--ink)] pt-4">
+              <div className="flex items-center gap-2">
+                {(optData.newScreenResult?.gaps?.length ?? 0) > 0 && !optData.allGapsClosed ? (
+                  <button
+                    onClick={() =>
+                      runOptimize(
+                        optData.iteration + 1,
+                        optData.revisedResume,
+                      )
+                    }
+                    disabled={running}
+                    className="raised flex cursor-pointer items-center gap-2 px-5 py-2 text-[12px] font-bold uppercase tracking-wider"
+                  >
+                    <span>⚡</span>
+                    <span>
+                      Refine Remaining Gaps (v{optData.iteration + 2})
+                    </span>
+                  </button>
+                ) : (
+                  <span className="text-[12px] font-bold uppercase tracking-wide text-[var(--good)]">
+                    ✓ All key gaps successfully closed!
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => onApplyResume(optData.revisedResume)}
+                  className="raised cursor-pointer px-4 py-2 text-[12px] font-bold uppercase tracking-wider"
+                  title="Loads this revised resume into the main editor at the top of the page"
+                >
+                  Load Into Main Editor
+                </button>
+                <button
+                  onClick={() => copyCleanResume(optData.revisedResume)}
+                  className="raised cursor-pointer px-4 py-2 text-[12px] font-bold uppercase tracking-wider"
+                >
+                  {copied ? "✓ Copied!" : "Copy Resume"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </Window>
+  );
+}
+
 function Footer() {
   return (
     <footer className="mt-10 break-inside-avoid">
@@ -1282,8 +1877,8 @@ function Footer() {
               feliperego.com
             </a>{" "}
             — data, storytelling and AI consulting. Judgments by TypeSafe&apos;s
-            Jev; wording by OpenAI. Your resume is redacted in your browser and
-            never stored.
+            Jev; wording by OpenAI. Your resume is processed privately (with
+            optional on-device redaction) and never stored.
           </p>
         </div>
       </div>
