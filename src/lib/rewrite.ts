@@ -54,21 +54,29 @@ const INSTRUCTIONS = `You are helping someone improve their own resume for a spe
 
 Everything measurable has already been decided by another system. Do not re-score anything, do not argue with the measurements, and do not hedge with "consider" or "you might want to".
 
-For each gap you are given, you get one of two situations.
+Provide a hint object in the 'hints' array for EVERY item in the input 'gaps' array. Do not skip or omit any dimension.
 
-SITUATION A — you are given current_line (the candidate's actual line, quoted from their resume).
-The experience is there but undersold. Your job:
-- diagnosis: say what a screener sees when they read that line, and what is missing from it. One or two sentences, plain language. Name the actual weakness, e.g. "it says you mentored people but not what changed as a result".
-- current_line: echo back the line you were given, exactly.
-- replacement: a drop-in rewrite of that one line. It must only use facts already present somewhere in the resume. Same rough length. Ready to paste, no placeholder brackets unless the candidate genuinely needs to fill in a number only they know — and if you must, make the bracket specific, like [number of people] not [X].
-- why: one sentence on what the rewrite buys them.
-- evidence_missing: false. how_to_earn_it: empty array.
+For each competency in 'gaps', you get one of two situations:
 
-SITUATION B — current_line is null.
-The resume has nothing to build on here. Do not invent, do not stretch an unrelated line to sound relevant, and do not suggest wording at all. Your job:
-- diagnosis: say plainly that this is not in the resume, and what the job is actually asking for. Do not be gentle to the point of being unclear.
+SITUATION A — candidate_shows_pct >= 35 OR current_line is present.
+The candidate ALREADY has evidence for this competency in their resume. NEVER say this is missing or not in their resume!
+- If candidate_shows_pct is close to or meets job_wants_pct (e.g. within 5-10 points or cleared):
+  diagnosis: acknowledge that their foundation is already solid (quote their demonstrated level or strength). Explain what fine-grained distinction is needed to close the remaining points or reach the top tier (e.g. strategic scale, org-wide reach, or quantifying business outcome).
+  replacement: a drop-in rewrite of current_line (or a drop-in bullet using facts from their resume) that elevates the phrasing to that top tier.
+  why: one sentence on what the elevation buys them with the screener.
+  evidence_missing: false. how_to_earn_it: empty array.
+- If they have a noticeable gap (e.g. shows 40% vs wants 80%):
+  diagnosis: say what a screener sees in that line and what needs to be made clearer or stronger.
+  current_line: echo back the line you were given, or null if no single line was anchored.
+  replacement: a drop-in rewrite that strengthens the existing evidence using facts already in the resume.
+  why: one sentence on what the rewrite buys them.
+  evidence_missing: false. how_to_earn_it: empty array.
+
+SITUATION B — candidate_shows_pct < 35 AND current_line is null.
+The resume genuinely has nothing to build on here. Do not invent, do not stretch an unrelated line, and do not suggest wording. Your job:
+- diagnosis: say plainly that this competency is not evident in the resume yet, and what the role needs.
 - current_line: null. replacement: null.
-- why: one sentence on why this gap matters for this particular role.
+- why: one sentence on why this gap matters for this role.
 - evidence_missing: true.
 - how_to_earn_it: two concrete, genuinely achievable things that would let them make the claim honestly. Specific actions, not "gain experience".
 
@@ -111,11 +119,10 @@ export async function rewriteHints(
             },
         gaps: gaps.map((g) => ({
           dimension_id: g.id,
-          what_is_missing: g.label,
-          // Null here is the signal for situation B, and it comes from Jev
-          // rather than from this model's own judgment.
+          competency_name: g.label,
+          candidate_shows_pct: Math.round(g.demonstrated * 100),
+          job_wants_pct: Math.round(g.importance * 100),
           current_line: g.anchor?.text ?? null,
-          line_number: g.anchor?.line ?? null,
           reads_at_this_level_now: g.currentLevel,
           next_level_up: g.nextLevel,
         })),

@@ -18,7 +18,7 @@ resume ──────▶ REDACTED IN THE BROWSER
                nothing below this line ever sees them
                             │
 job ad ──────▶ PASS 1 · the role
-               24 Nouls — "does this role require X?"
+               40 Nouls — "does this role require X?"
                the returned probability IS the weight
                + required seniority, + which practitioner it's hiring
                             │
@@ -102,7 +102,7 @@ reaches the browser.
 ## Tuning it
 
 **`src/lib/dimensions.ts` is the file you edit.** It holds the competency
-catalogue: 24 dimensions, each with a yes/no question asked about the job ad and
+catalogue: 40 dimensions, each with a yes/no question asked about the job ad and
 a five-level rubric scored against the resume. Jev never invents a dimension — it
 only selects from and scores against this list, so the catalogue is the ceiling on
 what the app can notice. Add dimensions for your field; the rest of the code
@@ -120,7 +120,7 @@ Thresholds live at the top of `src/lib/screen.ts`:
 
 - `REQUIREMENT_THRESHOLD` (0.4) — how strongly the ad must want something before
   it gets scored.
-- `MAX_SCORED_DIMENSIONS` (10) — cap on the second pass.
+- `MAX_SCORED_DIMENSIONS` (20) — cap on the second pass.
 - `MIN_SCORE_CONFIDENCE` (0.55) — below this, a score is reported but not acted on.
 - `MIN_CHOICE_CONFIDENCE` (0.5) — below this, a choice is reported as ambiguous.
 

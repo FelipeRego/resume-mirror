@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { TALENT_PROFILES } from "@/lib/dimensions";
+import { DIMENSION_BY_ID, TALENT_PROFILES } from "@/lib/dimensions";
 import { redact, type Redaction } from "@/lib/redact";
 import type { Positioning, RewriteHint } from "@/lib/rewrite";
 import type { ScreenResult } from "@/lib/screen";
@@ -45,7 +45,7 @@ function buildActions(report: Report): Action[] {
   if (!report.profile.matches && report.positioning) {
     out.push({
       what: `Rewrite your opening so you read as a ${profileName(report.profile.roleWants)}`,
-      where: report.positioningLine ? `line ${report.positioningLine.line}` : null,
+      where: "opening summary",
       detail:
         "This frames everything read after it, so it's worth more than any single bullet below.",
     });
@@ -56,8 +56,8 @@ function buildActions(report: Report): Action[] {
     const hint = hintFor(gap.id);
     if (hint && !hint.evidence_missing && gap.anchor) {
       out.push({
-        what: `Rewrite the ${gap.label.toLowerCase()} line`,
-        where: `line ${gap.anchor.line}`,
+        what: `Rewrite the ${gap.label.toLowerCase()} text`,
+        where: null,
         detail: `You're ${Math.round((gap.importance - gap.demonstrated) * 100)} points short on something this job weights at ${pct(gap.importance)}.`,
       });
     }
@@ -67,7 +67,7 @@ function buildActions(report: Report): Action[] {
   // chase X" steps read as three tasks when they are really one question
   // about whether this role is the right target at all.
   const absent = report.gaps.filter(
-    (g) => hintFor(g.id)?.evidence_missing ?? false,
+    (g) => (hintFor(g.id)?.evidence_missing ?? false) && g.cost > 0.15,
   );
   if (absent.length > 0) {
     const names = absent.map((g) => g.label.toLowerCase());
@@ -90,10 +90,8 @@ function buildActions(report: Report): Action[] {
 
   if (report.signals.buriesTheLede > 0.5) {
     out.push({
-      what: report.strongestLine
-        ? `Move line ${report.strongestLine.line} into your top third`
-        : "Move your most relevant experience into the top third",
-      where: report.strongestLine ? `line ${report.strongestLine.line}` : null,
+      what: "Move your strongest experience into your top third",
+      where: null,
       detail: "A screener decides in the first third. Below that is effectively unread.",
     });
   }
@@ -215,8 +213,10 @@ export default function Home() {
   return (
     <main className="mx-auto w-full max-w-[1400px] px-4 py-8 sm:px-8 sm:py-12">
       <header className="crop relative mb-8 px-3 py-6 sm:px-6 print:hidden">
-        <h1 className="text-3xl font-bold tracking-tight text-white sm:text-5xl">
-          RESUME MIRROR
+        <h1 className="w-fit text-3xl font-bold tracking-tight sm:text-5xl">
+          <span className="inline-block bg-[var(--accent)] px-2 py-0.5 text-[var(--ink)] selection:bg-[var(--ink)] selection:text-[var(--accent)]">
+            RESUME MIRROR
+          </span>
         </h1>
         <p className="mt-3 max-w-3xl text-[15px]/relaxed text-white/90">
           Most resumes are read by software before a person ever sees them.
@@ -614,10 +614,9 @@ function Results({ report }: { report: Report }) {
               <strong>What to do:</strong>{" "}
               {report.strongestLine ? (
                 <>
-                  your strongest proof for this job is on{" "}
-                  <strong>line {report.strongestLine.line}</strong>. If it
-                  isn&apos;t in your top third, move it — and echo it in your
-                  opening line so it&apos;s read twice.
+                  your strongest proof for this job is extracted below. If it
+                  isn&apos;t in your top third, move it higher — and echo it in
+                  your opening line so it&apos;s read twice.
                 </>
               ) : (
                 <>
@@ -627,9 +626,20 @@ function Results({ report }: { report: Report }) {
               )}
             </p>
             {report.strongestLine && (
-              <p className="mb-4 border-l-4 border-[var(--good)] bg-[var(--good)]/[0.08] px-3.5 py-2.5 text-[13px]/relaxed">
-                {report.strongestLine.text}
-              </p>
+              <div className="mb-4">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--good)]">
+                    Strongest proof in your resume
+                  </p>
+                  <CopyButton
+                    text={report.strongestLine.text}
+                    label="Copy (Cmd+F)"
+                  />
+                </div>
+                <p className="border-l-4 border-[var(--good)] bg-[var(--good)]/[0.08] px-3.5 py-2.5 text-[13px]/relaxed">
+                  {report.strongestLine.text}
+                </p>
+              </div>
             )}
             <ul className="flex flex-wrap gap-2">
               {report.strengths.map((s) => (
@@ -712,6 +722,31 @@ function barColour(d: Report["dimensions"][number]) {
   return "var(--good)";
 }
 
+function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard API unavailable/restricted
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={onCopy}
+      className="cursor-pointer text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] hover:text-[var(--ink)]"
+      title="Copy to clipboard"
+    >
+      {copied ? "✓ Copied" : label}
+    </button>
+  );
+}
+
 /**
  * One dimension: the bar, and directly beneath it the fix, if there is one.
  * Keeping these together is the point — the diagnosis and the thing to do
@@ -726,7 +761,18 @@ function DimensionRow({
 }) {
   const shortfall = Math.max(0, d.importance - d.demonstrated);
   const cleared = d.demonstrated >= d.importance;
-  const missing = hint?.evidence_missing ?? false;
+  // A competency is ONLY missing if demonstrated is low (< 0.35).
+  // When demonstrated is high (e.g. 96%), evidence is demonstrably present in the resume.
+  const missing = (hint?.evidence_missing ?? false) && d.demonstrated < 0.35;
+  const originalText = hint?.current_line || d.anchor?.text || null;
+  const veryClose = !cleared && shortfall <= 0.05;
+
+  const rubric = DIMENSION_BY_ID.get(d.id);
+  const targetLevelText =
+    d.nextLevel ||
+    rubric?.levels[Math.min(4, Math.max(1, Math.round(d.importance * 4)))] ||
+    rubric?.levels[4] ||
+    "senior impact and measurable outcomes";
 
   return (
     <article className="break-inside-avoid border border-[var(--ink)] p-4">
@@ -749,6 +795,14 @@ function DimensionRow({
       <p className="mt-2 text-[12px]/relaxed text-[var(--muted)]">
         {cleared ? (
           <>You&apos;re past what this job asks for here. </>
+        ) : veryClose ? (
+          <>
+            You&apos;re{" "}
+            <strong className="text-[var(--ink)]">
+              {Math.max(1, Math.round(shortfall * 100))} points short
+            </strong>{" "}
+            — very close to what this job asks for.{" "}
+          </>
         ) : (
           <>
             You&apos;re{" "}
@@ -761,7 +815,7 @@ function DimensionRow({
         Right now yours reads as: {d.currentLevel.toLowerCase()}
       </p>
 
-      {hint && (
+      {hint ? (
         <div className="mt-4 border-t border-dashed border-[var(--muted)] pt-3.5">
           {missing && (
             <span className="mb-2 inline-block border border-[var(--ink)] bg-[var(--accent)] px-2 py-0.5 text-[11px] uppercase tracking-wider">
@@ -771,46 +825,84 @@ function DimensionRow({
 
           <p className="text-[14px]/relaxed">{hint.diagnosis}</p>
 
-          {!missing && hint.current_line && hint.replacement && (
+          {!missing && originalText && (
             <div className="mt-3.5 flex flex-col gap-3">
               <div>
-                <p className="mb-1.5 text-[11px] uppercase tracking-widest text-[var(--muted)]">
-                  {!d.anchor
-                    ? "Your line"
-                    : d.anchor.uncertain
-                      ? `Probably line ${d.anchor.line} — worth checking this is the right one`
-                      : `Line ${d.anchor.line} of your resume`}
-                </p>
-                <p className="border-l-4 border-[var(--muted)] bg-black/[0.04] px-3.5 py-2.5 text-[13px]/relaxed line-through decoration-[var(--bad)]/60">
-                  {hint.current_line}
-                </p>
-              </div>
-              <div>
-                <p className="mb-1.5 text-[11px] uppercase tracking-widest text-[var(--muted)]">
-                  Change it to
-                </p>
-                <p className="border-l-4 border-[var(--good)] bg-[var(--good)]/[0.08] px-3.5 py-2.5 text-[13px]/relaxed font-medium">
-                  {hint.replacement}
+                <div className="mb-1.5 flex items-center justify-between">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">
+                    Original in your resume
+                  </p>
+                  <CopyButton text={originalText} label="Copy (Cmd+F)" />
+                </div>
+                <p
+                  className={`border-l-4 border-[var(--muted)] bg-black/[0.04] px-3.5 py-2.5 text-[13px]/relaxed ${
+                    cleared || veryClose ? "" : "line-through decoration-[var(--bad)]/60"
+                  }`}
+                >
+                  {originalText}
                 </p>
               </div>
+
+              {hint.replacement ? (
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--good)]">
+                      {cleared || veryClose ? "Suggested sharpening" : "Suggested change"}
+                    </p>
+                    <CopyButton text={hint.replacement} label="Copy rewrite" />
+                  </div>
+                  <p className="border-l-4 border-[var(--good)] bg-[var(--good)]/[0.08] px-3.5 py-2.5 text-[13px]/relaxed font-medium">
+                    {hint.replacement}
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <p className="mb-1.5 text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">
+                    Target to bridge the gap
+                  </p>
+                  <p className="border-l-4 border-[var(--good)] bg-[var(--good)]/[0.08] px-3.5 py-2.5 text-[13px]/relaxed font-medium">
+                    {targetLevelText}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
-          {missing && hint.how_to_earn_it.length > 0 && (
-            <div className="mt-3.5">
-              <p className="mb-2 text-[11px] uppercase tracking-widest text-[var(--muted)]">
-                How to genuinely earn this
+          {!missing && !originalText && (
+            <div className="mt-3.5 flex flex-col gap-2">
+              <div className="mb-1 flex items-center justify-between">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--good)]">
+                  {veryClose ? "Suggested sharpening" : "Suggested addition to bridge the gap"}
+                </p>
+                {hint.replacement && <CopyButton text={hint.replacement} label="Copy bullet" />}
+              </div>
+              <p className="border-l-4 border-[var(--good)] bg-[var(--good)]/[0.08] px-3.5 py-2.5 text-[13px]/relaxed font-medium">
+                {hint.replacement || `Add concrete evidence to your resume describing: ${targetLevelText}`}
               </p>
-              <ul className="flex flex-col gap-2">
-                {hint.how_to_earn_it.map((t, i) => (
-                  <li
-                    key={i}
-                    className="border-l-4 border-[var(--brand-blue-bright)] bg-black/[0.04] px-3.5 py-2.5 text-[13px]/relaxed"
-                  >
-                    {t}
-                  </li>
-                ))}
-              </ul>
+            </div>
+          )}
+
+          {missing && (
+            <div className="mt-3.5 flex flex-col gap-2">
+              <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--brand-blue-bright)]">
+                Suggested addition
+              </p>
+              {hint.how_to_earn_it.length > 0 ? (
+                <ul className="flex flex-col gap-2">
+                  {hint.how_to_earn_it.map((t, i) => (
+                    <li
+                      key={i}
+                      className="border-l-4 border-[var(--brand-blue-bright)] bg-black/[0.04] px-3.5 py-2.5 text-[13px]/relaxed"
+                    >
+                      {t}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="border-l-4 border-[var(--brand-blue-bright)] bg-black/[0.04] px-3.5 py-2.5 text-[13px]/relaxed">
+                  Add concrete evidence to your resume demonstrating: {targetLevelText}
+                </p>
+              )}
             </div>
           )}
 
@@ -820,7 +912,52 @@ function DimensionRow({
             </p>
           )}
         </div>
-      )}
+      ) : d.anchor ? (
+        <div className="mt-4 border-t border-dashed border-[var(--muted)] pt-3.5">
+          <div className="mb-1.5 flex items-center justify-between">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">
+              Original in your resume
+            </p>
+            <CopyButton text={d.anchor.text} label="Copy (Cmd+F)" />
+          </div>
+          <p className="border-l-4 border-[var(--muted)] bg-black/[0.04] px-3.5 py-2.5 text-[13px]/relaxed">
+            {d.anchor.text}
+          </p>
+          <div className="mt-3">
+            <p className="mb-1 text-[11px] font-bold uppercase tracking-widest text-[var(--good)]">
+              {veryClose ? "How to reach the top benchmark" : "Suggested improvement"}
+            </p>
+            <p className="border-l-4 border-[var(--good)] bg-[var(--good)]/[0.08] px-3.5 py-2.5 text-[13px]/relaxed">
+              Show evidence of: <span className="font-medium text-[var(--ink)]">{targetLevelText}</span>
+            </p>
+          </div>
+        </div>
+      ) : !cleared ? (
+        <div className="mt-4 border-t border-dashed border-[var(--muted)] pt-3.5">
+          {d.demonstrated < 0.35 && (
+            <span className="mb-2 inline-block border border-[var(--ink)] bg-[var(--accent)] px-2 py-0.5 text-[11px] uppercase tracking-wider">
+              Not in your resume yet
+            </span>
+          )}
+          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-widest text-[var(--good)]">
+            {veryClose
+              ? "How to bridge the final gap"
+              : d.demonstrated < 0.35
+                ? "Suggested addition"
+                : "To reach the top benchmark"}
+          </p>
+          <div className="border-l-4 border-[var(--good)] bg-[var(--good)]/[0.08] px-3.5 py-2.5 text-[13px]/relaxed">
+            <p className="text-[12px] text-[var(--muted)]">
+              {veryClose
+                ? `You're already at ${d.currentLevel.toLowerCase()}. To match the top benchmark (${pct(d.importance)}), elevate your bullet to describe:`
+                : `To bridge this gap (${pct(d.importance)} importance), add evidence describing:`}
+            </p>
+            <p className="mt-1 font-medium text-[var(--ink)]">
+              {targetLevelText}
+            </p>
+          </div>
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -968,7 +1105,7 @@ function SplitRead({
 }
 
 function ProfileRead({ report }: { report: Report }) {
-  const { profile, positioning, positioningLine } = report;
+  const { profile, positioning } = report;
   if (profile.matches && !profile.resumeAlternative) return null;
 
   return (
@@ -1009,19 +1146,29 @@ function ProfileRead({ report }: { report: Report }) {
             </p>
             <div className="flex flex-col gap-3">
               <div>
-                <p className="mb-1.5 text-[11px] uppercase tracking-widest text-[var(--muted)]">
-                  {positioningLine
-                    ? `Line ${positioningLine.line} of your resume`
-                    : "Your opening line"}
-                </p>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted)]">
+                    Original in your resume
+                  </p>
+                  <CopyButton
+                    text={positioning.current_line}
+                    label="Copy (Cmd+F)"
+                  />
+                </div>
                 <p className="border-l-4 border-[var(--muted)] bg-black/[0.04] px-3.5 py-2.5 text-[13px]/relaxed line-through decoration-[var(--bad)]/60">
                   {positioning.current_line}
                 </p>
               </div>
               <div>
-                <p className="mb-1.5 text-[11px] uppercase tracking-widest text-[var(--muted)]">
-                  Change it to
-                </p>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--good)]">
+                    Suggested change
+                  </p>
+                  <CopyButton
+                    text={positioning.replacement}
+                    label="Copy rewrite"
+                  />
+                </div>
                 <p className="border-l-4 border-[var(--good)] bg-[var(--good)]/[0.08] px-3.5 py-2.5 text-[13px]/relaxed font-medium">
                   {positioning.replacement}
                 </p>

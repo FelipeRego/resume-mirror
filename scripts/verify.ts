@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 
-import { DIMENSIONS, MAX_SCORE } from "../src/lib/dimensions";
+import { DIMENSIONS, MAX_SCORE, TALENT_PROFILES } from "../src/lib/dimensions";
 import { screen } from "../src/lib/screen";
 
 type Payload = {
@@ -166,6 +166,31 @@ async function main() {
       k.startsWith("req__"),
     );
     assert.equal(nouls.length, DIMENSIONS.length);
+    assert.equal(DIMENSIONS.length, 40, "catalogue contains 40 dimensions");
+  });
+
+  check("all catalogue dimensions satisfy rubric constraints", () => {
+    const ids = new Set<string>();
+    for (const d of DIMENSIONS) {
+      assert.ok(!ids.has(d.id), `duplicate dimension id: ${d.id}`);
+      ids.add(d.id);
+      assert.ok(d.label.trim().length > 0, `dimension ${d.id} has empty label`);
+      assert.ok(
+        d.requirement.trim().length > 0,
+        `dimension ${d.id} has empty requirement`,
+      );
+      assert.equal(d.levels.length, 5, `dimension ${d.id} must have 5 levels`);
+      for (let i = 0; i < d.levels.length; i++) {
+        assert.ok(
+          d.levels[i].trim().length > 0,
+          `dimension ${d.id} level ${i} is empty`,
+        );
+      }
+    }
+    for (const [key, desc] of Object.entries(TALENT_PROFILES)) {
+      assert.ok(key.trim().length > 0, "talent profile key is non-empty");
+      assert.ok(desc.trim().length > 0, `talent profile ${key} has empty description`);
+    }
   });
 
   check("candidate pass scores only the dimensions above threshold", () => {

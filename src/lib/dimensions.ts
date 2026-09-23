@@ -332,6 +332,214 @@ export const DIMENSIONS: readonly Dimension[] = [
       "Published or led original research that others build on",
     ],
   },
+  {
+    id: "cybersecurity",
+    label: "Security and compliance posture",
+    requirement:
+      "This role requires identifying security risks, securing applications or systems, or maintaining compliance standards.",
+    levels: [
+      "No security, privacy, or compliance work appears",
+      "Security tools or certifications are listed without described work",
+      "Implemented security fixes, controls, or basic vulnerability remediations",
+      "Security was a recurring responsibility, including threat modeling, audits, or incident response",
+      "Owned end-to-end security architecture, compliance programs, or enterprise risk posture",
+    ],
+  },
+  {
+    id: "devops_sre",
+    label: "DevOps and site reliability",
+    requirement:
+      "This role requires managing CI/CD pipelines, release processes, or system reliability and uptime.",
+    levels: [
+      "No DevOps, release, or reliability work appears",
+      "CI/CD or deployment tools are named in a skills list only",
+      "Maintained builds or configured deployment workflows for specific services",
+      "DevOps and deployment automation were a core, regular responsibility",
+      "Owned site reliability, SLOs/SLAs, incident response, or automated release platforms across multiple systems",
+    ],
+  },
+  {
+    id: "qa_automation",
+    label: "Testing and quality assurance",
+    requirement:
+      "This role requires designing, writing, or managing automated test suites and quality engineering.",
+    levels: [
+      "No testing or quality assurance work appears",
+      "Testing frameworks are listed in skills without described test suites",
+      "Wrote unit, integration, or end-to-end tests for specific features",
+      "Testing and test automation were a primary, continuous responsibility",
+      "Architected test automation frameworks or quality strategies adopted across engineering teams",
+    ],
+  },
+  {
+    id: "frontend_development",
+    label: "Frontend engineering",
+    requirement:
+      "This role requires building browser-based user interfaces, web applications, or frontend client code.",
+    levels: [
+      "No frontend or browser interface work appears",
+      "Frontend frameworks are listed in skills, but no interface work is described",
+      "Built user interfaces and pages for specific features or projects",
+      "Frontend development was a primary day-to-day focus across multiple projects",
+      "Architected complex web applications, design systems, or high-performance frontend codebases",
+    ],
+  },
+  {
+    id: "mobile_development",
+    label: "Mobile app development",
+    requirement:
+      "This role requires developing native or cross-platform mobile apps for iOS or Android.",
+    levels: [
+      "No mobile application work appears",
+      "Mobile platforms or SDKs are listed in skills without described app work",
+      "Built features within an existing mobile application",
+      "Mobile app development was a core ongoing responsibility",
+      "Owned mobile apps end-to-end, from architecture and performance to app store releases",
+    ],
+  },
+  {
+    id: "api_integrations",
+    label: "API design and integration",
+    requirement:
+      "This role requires designing, building, or integrating REST, GraphQL, or third-party web services.",
+    levels: [
+      "No API or integration work appears",
+      "API tools or protocols are named in skills only",
+      "Consumed or built specific API endpoints for a project",
+      "Designed and built APIs or integrated external services as a core responsibility",
+      "Owned API platforms, contracts, and integrations used by external partners or multiple engineering teams",
+    ],
+  },
+  {
+    id: "genai_llms",
+    label: "Generative AI and LLM solutions",
+    requirement:
+      "This role requires building, evaluating, or deploying generative AI models, LLMs, or agentic workflows.",
+    levels: [
+      "No generative AI or LLM work appears",
+      "GenAI tools or prompt engineering are listed as interests or skills only",
+      "Built prototypes or features using LLM APIs or prompt workflows",
+      "Building and evaluating LLM-powered applications was a core responsibility",
+      "Architected production LLM systems, evaluation benchmarks, or complex multi-agent architectures in production",
+    ],
+  },
+  {
+    id: "bi_visualization",
+    label: "Business intelligence and dashboards",
+    requirement:
+      "This role requires building interactive dashboards, data visualisations, or BI reporting suites.",
+    levels: [
+      "No dashboard or BI work appears",
+      "BI tools such as Tableau or Power BI appear only in a skills list",
+      "Built specific dashboards or charts for a project or team",
+      "Dashboard creation and BI reporting were core, recurring responsibilities",
+      "Designed enterprise-wide BI semantic layers, reporting standards, or executive visualisations",
+    ],
+  },
+  {
+    id: "user_research",
+    label: "User research and usability",
+    requirement:
+      "This role requires conducting user research, usability testing, or customer discovery interviews.",
+    levels: [
+      "No user research or usability testing appears",
+      "Attended research sessions or read research summaries without running them",
+      "Conducted specific user interviews, usability tests, or feedback surveys",
+      "User research and discovery were core, ongoing responsibilities",
+      "Designed and led strategic research initiatives that redefined product direction or user journeys",
+    ],
+  },
+  {
+    id: "agile_coaching",
+    label: "Agile delivery and scrum",
+    requirement:
+      "This role requires facilitating agile practices, scrum ceremonies, or sprint planning.",
+    levels: [
+      "No agile ceremony or sprint facilitation appears",
+      "Participated in agile ceremonies run by others without facilitating",
+      "Facilitated standups, retrospectives, or sprint planning for a team",
+      "Agile facilitation and sprint workflow management were explicit responsibilities",
+      "Coached multiple teams or organisations in agile methodologies and delivery improvements",
+    ],
+  },
+  {
+    id: "operations_process",
+    label: "Operations and process improvement",
+    requirement:
+      "This role requires designing, streamlining, or scaling operational workflows and business processes.",
+    levels: [
+      "No operational or process improvement work appears",
+      "Followed standard operating procedures without modifying them",
+      "Streamlined specific operational workflows or procedures",
+      "Process design and operational efficiency were primary responsibilities",
+      "Designed and scaled organisation-wide operating models or continuous improvement initiatives",
+    ],
+  },
+  {
+    id: "customer_success",
+    label: "Customer success and retention",
+    requirement:
+      "This role requires managing customer relationships, onboarding, account retention, or client satisfaction.",
+    levels: [
+      "No post-sales customer management appears",
+      "Answered customer inquiries reactively without account ownership",
+      "Managed onboarding or ongoing relationships for specific customer accounts",
+      "Customer retention, health, and renewals were core responsibilities",
+      "Owned customer success strategy, churn reduction, or enterprise customer advocacy across a portfolio",
+    ],
+  },
+  {
+    id: "financial_modeling",
+    label: "Financial analysis and budgeting",
+    requirement:
+      "This role requires financial modelling, forecasting, budgeting, or unit economics analysis.",
+    levels: [
+      "No financial analysis or budgeting appears",
+      "Handled project receipts or invoice processing only",
+      "Built specific budgets, financial models, or cost-benefit forecasts",
+      "Financial planning, variance analysis, and modelling were regular responsibilities",
+      "Owned corporate budgeting, P&L forecasting, or complex valuation and pricing models",
+    ],
+  },
+  {
+    id: "hiring_recruiting",
+    label: "Interviewing and talent acquisition",
+    requirement:
+      "This role requires interviewing, evaluating, or recruiting candidates for hire.",
+    levels: [
+      "No interviewing or hiring involvement appears",
+      "Participated as a secondary interviewer without assessing independently",
+      "Conducted interviews and evaluated candidates for specific roles",
+      "Hiring, candidate screening, and interviewing were regular responsibilities",
+      "Built hiring rubrics, scaled team headcount, or designed technical interview processes",
+    ],
+  },
+  {
+    id: "vendor_management",
+    label: "Vendor and partner management",
+    requirement:
+      "This role requires sourcing, evaluating, negotiating with, or managing external vendors and suppliers.",
+    levels: [
+      "No vendor or supplier management appears",
+      "Used third-party vendor tools without managing the relationship",
+      "Managed day-to-day coordination with specific external vendors",
+      "Vendor selection, contract evaluation, and SLA tracking were core responsibilities",
+      "Owned vendor procurement strategy, contract negotiations, and enterprise partnerships",
+    ],
+  },
+  {
+    id: "cross_functional",
+    label: "Cross-functional coordination",
+    requirement:
+      "This role requires aligning and coordinating initiatives across multiple distinct business functions.",
+    levels: [
+      "Work was confined strictly within a single team",
+      "Interacted with other teams occasionally without driving shared outcomes",
+      "Coordinated cross-functional work on specific projects or launches",
+      "Leading cross-functional alignment was a continuous day-to-day responsibility",
+      "Unified divergent stakeholders across engineering, product, commercial, and operations to deliver strategic goals",
+    ],
+  },
 ] as const;
 
 export const DIMENSION_BY_ID = new Map(DIMENSIONS.map((d) => [d.id, d]));
@@ -407,6 +615,12 @@ export const TALENT_PROFILES = {
     "Leads people and functions: hiring, performance, structure, and strategy. Technical background may exist but is no longer the main contribution.",
   commercial_gtm:
     "Revenue-facing work: sales, business development, partnerships, marketing, or growth.",
+  qa_test_engineer:
+    "Owns software quality and testing: automated test frameworks, regression suites, performance testing, bug triaging.",
+  customer_success_manager:
+    "Owns customer retention and outcomes: onboarding, account health, renewals, support escalation, customer advocacy.",
+  operations_specialist:
+    "Owns business workflows, logistics, and process efficiency: internal tooling, operational cadence, execution scaling.",
   other:
     "Real professional work that fits none of the above.",
 } as const;

@@ -40,7 +40,7 @@ import { numberLines } from "./redact";
  *                                      "is this a good candidate?" anywhere
  *   5. Structure in the questions .... instructions carry question + focus + the
  *                                      data the question refers to
- *   6. Ask a lot of questions ........ ~24 in pass 1, ~16 in pass 2, all parallel
+ *   6. Ask a lot of questions ........ ~40 in pass 1, ~25 in pass 2, all parallel
  *   7. Combine outputs in code ....... fit and cost are arithmetic, not judgment
  *   8. Route on uncertainty .......... low-confidence reads are quarantined
  *                                      rather than reported as fact
@@ -56,7 +56,7 @@ import { numberLines } from "./redact";
 /** A dimension counts as part of the role above this probability. */
 const REQUIREMENT_THRESHOLD = 0.4;
 /** Never score more than this many dimensions, highest-weighted first. */
-const MAX_SCORED_DIMENSIONS = 10;
+const MAX_SCORED_DIMENSIONS = 20;
 /**
  * Below this, we do not trust a score enough to tell someone to act on it.
  * Step 8 of the guide: escalate rather than assert. Tune against your own data —
@@ -552,7 +552,9 @@ async function anchorGaps(
   };
 
   for (const gap of gaps) {
-    if (asNoul(answers, `has__${gap.id}`) < 0.5) continue;
+    const hasEvidence =
+      gap.demonstrated >= 0.4 || asNoul(answers, `has__${gap.id}`) >= 0.5;
+    if (!hasEvidence) continue;
 
     const picked = asChoice(answers, `where__${gap.id}`, "");
     const line = byId.get(picked.value);
@@ -628,7 +630,10 @@ export async function screen(
       uncertain: confidence < MIN_SCORE_CONFIDENCE,
       cost: importance * (1 - demonstrated),
       currentLevel: rubric.levels[levelIndex],
-      nextLevel: levelIndex < MAX_SCORE ? rubric.levels[levelIndex + 1] : null,
+      nextLevel:
+        levelIndex < MAX_SCORE
+          ? rubric.levels[levelIndex + 1]
+          : rubric.levels[MAX_SCORE],
       anchor: null,
     };
   });
@@ -651,9 +656,8 @@ export async function screen(
   const years = asScore(cAnswers, "experience_years");
 
   const gaps = [...confident]
-    .filter((d) => d.cost > 0.15)
-    .sort((a, b) => b.cost - a.cost)
-    .slice(0, 5);
+    .filter((d) => d.cost > 0)
+    .sort((a, b) => b.cost - a.cost);
 
   const strengths = [...confident]
     .filter((d) => d.demonstrated >= 0.6 && d.importance >= 0.5)
